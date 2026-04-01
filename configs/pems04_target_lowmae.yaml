@@ -1,0 +1,47 @@
+defaults:
+  - pems04.yaml
+
+experiment:
+  name: pems04_target_lowmae
+
+dataset:
+  input_dim: 1
+  history_steps: 24
+  horizon_steps: 3
+  batch_size: 32
+  dynamic_semantic:
+    enabled: false
+    # ASSUMPTION: disable dynamic semantic first to stabilize low-MAE convergence.
+
+model:
+  sem_dim: 1024
+  hidden_dim: 256
+  time_embed_dim: 256
+  router_hidden_dim: 256
+  num_layers: 4
+  dropout: 0.05
+  semantic_dropout_p: 0.0
+  gamma: 0.0
+  # ASSUMPTION: larger denoiser and gamma=0 are more stable for H=3 point-forecast optimization.
+
+train:
+  epochs: 180
+  lr: 1.0e-4
+  weight_decay: 1.0e-6
+  grad_clip: 3.0
+  eval_interval: 1
+  train_num_eval_samples: 20
+  max_eval_batches: 20
+  num_eval_samples: 20
+  eval_horizons: [3]
+  metric_feature_index: 0
+  loss_eps_weight: 1.0
+  loss_x0_weight: 1.0
+  loss_x0_type: l1
+  save_dir: ./outputs/checkpoints/pems04_target_lowmae
+  # ASSUMPTION: stronger x0 auxiliary loss benefits MAE.
+
+diffusion:
+  clip_x0: false
+  num_steps: 50
+  sampling_steps: 50

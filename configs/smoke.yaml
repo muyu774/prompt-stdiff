@@ -1,0 +1,30 @@
+defaults:
+  - default.yaml
+
+dataset:
+  name: pems03
+  data_root: ./data
+  num_nodes: 8
+  input_dim: 1
+  history_steps: 6
+  horizon_steps: 6
+  batch_size: 4
+  num_workers: 0
+
+model:
+  sem_dim: 16
+  hidden_dim: 32
+  time_embed_dim: 32
+  router_hidden_dim: 32
+  num_layers: 2
+
+diffusion:
+  num_steps: 8
+  sampling_steps: 8
+
+train:
+  epochs: 1
+  log_interval: 1
+  eval_interval: 1
+  num_eval_samples: 3
+  save_dir: ./outputs/smoke_ckpt

@@ -1,0 +1,23 @@
+defaults:
+  - default.yaml
+
+dataset:
+  name: pems08
+  num_nodes: 170
+  input_dim: 1
+  # ASSUMPTION: train on primary traffic channel (flow) first for better MAE on feature-0 metric.
+  history_steps: 24
+  horizon_steps: 12
+  batch_size: 32
+
+model:
+  sem_dim: 1024
+  gamma: 0.0
+
+train:
+  lr: 2.0e-4
+  save_dir: ./outputs/checkpoints/pems08
+  metric_feature_index: 0
+
+diffusion:
+  clip_x0: false

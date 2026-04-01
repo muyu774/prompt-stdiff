@@ -1,0 +1,26 @@
+train:
+  seed: 42
+  epochs: 50
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  grad_clip: 5.0
+  log_interval: 50
+  eval_interval: 1
+  save_dir: ./outputs/checkpoints
+  mixed_precision: false
+  save_last_every_epoch: true
+  # ASSUMPTION: save `last.pt` every epoch to avoid losing progress when training is interrupted.
+  train_num_eval_samples: 20
+  # ASSUMPTION: use fewer Monte-Carlo samples for in-training validation speed.
+  max_eval_batches: 20
+  # ASSUMPTION: use subset validation during training for quick model selection.
+  num_eval_samples: 20
+  eval_horizons: [3, 6, 12]
+  metric_feature_index: null
+  mape_eps: 1.0e-5
+  mape_mask_threshold: 1.0
+  loss_eps_weight: 1.0
+  loss_x0_weight: 0.5
+  loss_x0_type: l1
+  # ASSUMPTION: add x0 auxiliary reconstruction loss to improve point MAE.
+  # ASSUMPTION: use 100 Monte-Carlo samples for CRPS to match paper-style probabilistic evaluation.

@@ -1,0 +1,9 @@
+defaults:
+  - data.yaml
+  - model.yaml
+  - diffusion.yaml
+  - train.yaml
+
+experiment:
+  name: prompt_stdiff_pems
+  output_dir: ./outputs

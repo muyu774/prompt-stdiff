@@ -1,0 +1,170 @@
+"""Build dynamic semantic event bank for strict time-truncated semantic conditioning.
+
+Input CSV should contain timestamp and event text/context columns, optionally node_index.
+Output NPZ contains:
+- step_idx: [E]
+- node_index: [E] (-1 for global events)
+- embedding: [E, D]
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import List, Optional
+
+import numpy as np
+import pandas as pd
+
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+    return out
+
+
+def _clean_text(v: object) -> Optional[str]:
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() in {"nan", "none", "null", "na", "n/a", "unknown"}:
+        return None
+    return s
+
+
+def _compose_event_text(row: pd.Series, text_col: Optional[str], fields: List[str]) -> Optional[str]:
+    """Build one event text from available columns."""
+    if text_col is not None and text_col in row.index:
+        text = _clean_text(row[text_col])
+        if text is not None:
+            return text
+
+    parts: List[str] = []
+    for f in fields:
+        if f not in row.index:
+            continue
+        val = _clean_text(row[f])
+        if val is not None:
+            parts.append(f"{f}: {val}")
+
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Build dynamic semantic bank")
+    parser.add_argument("--events_csv", type=Path, required=True)
+    parser.add_argument("--out_npz", type=Path, required=True)
+    parser.add_argument("--model_name", type=str, default="sentence-transformers/all-roberta-large-v1")
+    parser.add_argument("--time_col", type=str, default="timestamp")
+    parser.add_argument("--text_col", type=str, default="text")
+    parser.add_argument("--node_col", type=str, default="node_index")
+    parser.add_argument(
+        "--fields",
+        type=str,
+        default="weather,incident,holiday,time_context,district,event_type,description",
+        help="Fallback columns used to compose text when text_col is empty.",
+    )
+    parser.add_argument("--start_time", type=str, required=True, help="Timeline origin, e.g. 2018-01-01 00:00:00")
+    parser.add_argument("--freq_minutes", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--normalize_embeddings", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise ImportError(
+            "Please install sentence-transformers and datasets to build dynamic semantic bank."
+        ) from exc
+
+    if not args.events_csv.exists():
+        raise FileNotFoundError(
+            f"events_csv not found: {args.events_csv}. "
+            "Create one first, e.g.\n"
+            "python scripts/init_dynamic_events.py "
+            "--data_npz data/pems03/data.npz "
+            "--out_csv data/pems03/dynamic_events.csv "
+            "--mode time_context "
+            "--start_time '2018-01-01 00:00:00' --freq_minutes 5"
+        )
+
+    df = _normalize_columns(pd.read_csv(args.events_csv))
+
+    time_col = args.time_col.strip().lower()
+    text_col = args.text_col.strip().lower() if args.text_col else None
+    node_col = args.node_col.strip().lower() if args.node_col else None
+    fields = [x.strip().lower() for x in args.fields.split(",") if x.strip()]
+
+    if time_col not in df.columns:
+        raise ValueError(f"Missing time column: {time_col}. available={list(df.columns)}")
+
+    ts = pd.to_datetime(df[time_col], errors="coerce")
+    valid_time = ts.notna()
+    df = df.loc[valid_time].copy()
+    ts = ts.loc[valid_time]
+
+    start_ts = pd.Timestamp(args.start_time)
+    delta_sec = (ts - start_ts).dt.total_seconds().to_numpy()
+    step_idx = np.floor(delta_sec / float(args.freq_minutes * 60)).astype(np.int64)
+
+    # ASSUMPTION: events before timeline start are dropped.
+    valid_step = step_idx >= 0
+    df = df.loc[valid_step].copy()
+    step_idx = step_idx[valid_step]
+
+    texts: List[str] = []
+    keep_mask = []
+    for _, row in df.iterrows():
+        text = _compose_event_text(row=row, text_col=text_col, fields=fields)
+        if text is None:
+            keep_mask.append(False)
+            texts.append("")
+        else:
+            keep_mask.append(True)
+            texts.append(text)
+
+    keep_mask_arr = np.asarray(keep_mask, dtype=bool)
+    if keep_mask_arr.sum() == 0:
+        raise ValueError("No valid event texts found after filtering.")
+
+    df = df.loc[keep_mask_arr].reset_index(drop=True)
+    step_idx = step_idx[keep_mask_arr]
+    texts = [t for t, k in zip(texts, keep_mask) if k]
+
+    if node_col is not None and node_col in df.columns:
+        node_vals = pd.to_numeric(df[node_col], errors="coerce").fillna(-1).to_numpy(dtype=np.int64)
+    else:
+        # ASSUMPTION: missing node column means global events.
+        node_vals = np.full((len(df),), -1, dtype=np.int64)
+
+    model = SentenceTransformer(args.model_name)
+    emb = model.encode(
+        texts,
+        convert_to_numpy=True,
+        batch_size=int(args.batch_size),
+        normalize_embeddings=bool(args.normalize_embeddings),
+        show_progress_bar=True,
+    ).astype(np.float32)
+
+    args.out_npz.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        args.out_npz,
+        step_idx=step_idx.astype(np.int64),
+        node_index=node_vals.astype(np.int64),
+        embedding=emb,
+    )
+
+    print(f"Saved dynamic semantic bank: {args.out_npz}")
+    print(f"events={len(step_idx)} dim={emb.shape[1]}")
+    print(f"step_idx range=({int(step_idx.min())}, {int(step_idx.max())})")
+    print(f"global_event_ratio={(node_vals < 0).mean():.4f}")
+
+
+if __name__ == "__main__":
+    main()

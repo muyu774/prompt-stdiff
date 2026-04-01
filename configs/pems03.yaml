@@ -1,0 +1,26 @@
+defaults:
+  - default.yaml
+
+dataset:
+  history_steps: 24
+  dynamic_semantic:
+    enabled: false
+    bank_file: dynamic_semantic_bank.npz
+    strict_truncation: true
+    # ASSUMPTION: disable dynamic semantic by default for stable baseline on pems03;
+    # enable it later only after dynamic event quality is verified.
+
+model:
+  sem_dim: 1024
+  gamma: 0.00
+  # ASSUMPTION: training currently uses standard Gaussian forward noise; use gamma=0
+  # to avoid reverse-process initialization mismatch and stabilize MAE.
+
+train:
+  lr: 2.0e-4
+  metric_feature_index: 0
+  # ASSUMPTION: use lower LR for more stable diffusion training on pems03 low-MAE baseline.
+
+diffusion:
+  clip_x0: false
+  # ASSUMPTION: disable x0 clipping for heavy-tailed traffic flow values.

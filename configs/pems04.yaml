@@ -1,0 +1,17 @@
+defaults:
+  - default.yaml
+
+dataset:
+  name: pems04
+  num_nodes: 307
+  input_dim: 3
+  history_steps: 12
+  horizon_steps: 12
+  batch_size: 32
+
+model:
+  sem_dim: 1024
+
+train:
+  save_dir: ./outputs/checkpoints/pems04
+  metric_feature_index: 0

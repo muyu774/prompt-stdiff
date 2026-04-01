@@ -1,0 +1,46 @@
+defaults:
+  - pems08.yaml
+
+experiment:
+  name: pems08_target13_h3
+
+dataset:
+  history_steps: 24
+  horizon_steps: 3
+  input_dim: 1
+  batch_size: 32
+  dynamic_semantic:
+    enabled: false
+    # ASSUMPTION: disable dynamic semantic for low-MAE stability first.
+
+model:
+  hidden_dim: 256
+  time_embed_dim: 256
+  router_hidden_dim: 256
+  num_layers: 4
+  dropout: 0.05
+  semantic_dropout_p: 0.0
+  gamma: 0.0
+  # ASSUMPTION: stronger denoiser capacity + zero semantic initialization bias for H=3 low-MAE target.
+
+train:
+  epochs: 180
+  lr: 1.0e-4
+  weight_decay: 1.0e-6
+  grad_clip: 3.0
+  eval_interval: 1
+  train_num_eval_samples: 20
+  max_eval_batches: 20
+  num_eval_samples: 20
+  eval_horizons: [3]
+  metric_feature_index: 0
+  loss_eps_weight: 1.0
+  loss_x0_weight: 1.0
+  loss_x0_type: l1
+  save_dir: ./outputs/checkpoints/pems08_target13_h3
+  # ASSUMPTION: higher x0 auxiliary weight helps optimize point-forecast MAE.
+
+diffusion:
+  clip_x0: false
+  num_steps: 50
+  sampling_steps: 50

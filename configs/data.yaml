@@ -1,0 +1,36 @@
+dataset:
+  name: pems03
+  data_root: ./data
+  data_file: data.npz
+  adjacency_file: adjacency.csv
+  physical_sigma: auto
+  physical_norm_mode: sym
+  semantic_embedding_file: semantic_embeddings.npy
+  semantic_graph_file: A_sem_norm.npy
+  semantic_graph_raw_file: A_sem.npy
+  semantic_graph_norm_mode: sym
+  semantic_top_k: 20
+  semantic_graph_rebuild: false
+  num_nodes: 358
+  input_dim: 1
+  time_freq_minutes: 5
+  history_steps: 12
+  horizon_steps: 12
+  batch_size: 32
+  num_workers: 4
+  train_shuffle: true
+  # ASSUMPTION: shuffle training windows for better SGD convergence.
+  train_ratio: 0.6
+  val_ratio: 0.2
+  test_ratio: 0.2
+  scaler: standard
+  scaler_mode: per_node
+  # ASSUMPTION: per-node standardization is more suitable for heterogeneous sensor scales.
+  pems_supported: [pems03, pems04, pems08]
+  dynamic_semantic:
+    enabled: false
+    bank_file: dynamic_semantic_bank.npz
+    fusion_alpha: 0.35
+    recency_tau_steps: 288
+    strict_truncation: true
+    # ASSUMPTION: dynamic semantic context uses 5-min step index and exponential recency weighting.

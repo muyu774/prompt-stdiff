@@ -1,0 +1,13 @@
+model:
+  hidden_dim: 128
+  time_embed_dim: 128
+  sem_dim: 384
+  num_layers: 3
+  dropout: 0.1
+  semantic_dropout_p: 0.1
+  router_hidden_dim: 128
+  learn_mu_prior: false
+  learn_sigma_prior: false
+  gamma: 0.35
+  gamma_schedule: constant
+  # ASSUMPTION: constant gamma is used by default to match paper-style semantic initialization.

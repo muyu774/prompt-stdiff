@@ -36,21 +36,29 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_semantic_embeddings_or_fallback(config: dict, logger) -> np.ndarray:
-    """Load cached semantic embeddings, fallback to random initialization."""
+    """Load cached semantic embeddings with configurable fallback behavior."""
     dcfg = config["dataset"]
     mcfg = config["model"]
     root = Path(dcfg["data_root"]) / dcfg["name"]
     sem_path = root / dcfg["semantic_embedding_file"]
+    semantic_required = bool(dcfg.get("semantic_required", True))
+    allow_fallback = bool(dcfg.get("allow_random_semantic_fallback", False))
 
     if sem_path.exists():
         z_sem = load_semantic_embeddings(sem_path)
         return z_sem
 
-    # ASSUMPTION: fallback random semantic embeddings if cache not found.
-    logger.warning("semantic embeddings missing at %s, using random fallback", sem_path)
+    if semantic_required and (not allow_fallback):
+        raise FileNotFoundError(
+            f"Semantic embeddings are required but missing: {sem_path}. "
+            "Please run semantic/offline encoder before training."
+        )
+
+    # ASSUMPTION: fallback random semantic embeddings are allowed only for debug/dry-run.
+    logger.warning(
+        "semantic embeddings missing at %s, using random fallback (debug mode)", sem_path
+    )
     z_sem = np.random.randn(int(dcfg["num_nodes"]), int(mcfg["sem_dim"])).astype(np.float32)
-    sem_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(sem_path, z_sem)
     return z_sem
 
 

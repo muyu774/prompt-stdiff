@@ -60,6 +60,7 @@ python scripts/build_semantic_metadata.py \
 说明：
 - `template`：只生成可手工补全的模板列。
 - `weak_labels`：按图结构自动给出粗粒度标签（`ASSUMPTION`），可作为冷启动版本。
+- `external_match`：从外部静态元数据表按 `node_index`/`node_id` 确定性合并（推荐用于论文主实验）。
 
 然后基于 `node_metadata.csv` 生成语义向量（可同时导出 prompt 文本便于检查）：
 
@@ -116,6 +117,21 @@ python scripts/fetch_real_dynamic_events.py \
   --longitude -118.2437 \
   --country_code US \
   --timezone America/Los_Angeles
+
+# 若事故 CSV 提供经纬度，可做 “2km + 拓扑” 映射：
+python scripts/fetch_real_dynamic_events.py \
+  --out_csv data/pems03/dynamic_events.csv \
+  --start_date 2018-01-01 \
+  --end_date 2018-03-31 \
+  --latitude 34.0522 \
+  --longitude -118.2437 \
+  --country_code US \
+  --timezone America/Los_Angeles \
+  --incidents_csv data/pems03/incidents_raw.csv \
+  --sensor_metadata_csv data/pems03/sensor_geo.csv \
+  --adjacency_csv data/pems03/adjacency.csv \
+  --incident_radius_m 2000 \
+  --topology_hops 3
 ```
 
 若要同时加入 POI 事件上下文（基于 OSM/Overpass）：
@@ -133,6 +149,19 @@ python scripts/fetch_real_dynamic_events.py \
   --poi_radius_m 20000 \
   --poi_top_k 4 \
   --poi_catalog_csv data/pems03/poi_catalog.csv
+
+也可先单独把事故经纬度映射到传感器节点：
+
+```bash
+python scripts/map_incidents_to_sensors.py \
+  --incidents_csv data/pems03/incidents_raw.csv \
+  --sensor_csv data/pems03/sensor_geo.csv \
+  --adjacency_csv data/pems03/adjacency.csv \
+  --out_csv data/pems03/incidents_mapped.csv \
+  --radius_m 2000 \
+  --topology_hops 3 \
+  --assign_global_if_unmapped
+```
 ```
 
 然后再构建动态语义银行：
@@ -150,6 +179,8 @@ python scripts/build_dynamic_semantic_bank.py \
 
 ```yaml
 dataset:
+  semantic_required: true
+  allow_random_semantic_fallback: false
   dynamic_semantic:
     enabled: true
     bank_file: dynamic_semantic_bank.npz
@@ -161,6 +192,7 @@ dataset:
 说明：
 - `strict_truncation=true` 时，每个样本只使用 `cutoff_step`（预测起点）之前的事件语义。
 - 动态语义会与静态 `Z_sem` 融合后再进入 prior / router / denoiser。
+- `semantic_required=true` 时若缺失 `semantic_embeddings.npy` 会直接报错（论文主实验推荐）。
 
 ## 4. Kaggle 原始数据预处理（你给的链接）
 
@@ -218,6 +250,9 @@ python train.py --config configs/default.yaml
 python train.py --config configs/pems03.yaml
 python train.py --config configs/pems04.yaml
 python train.py --config configs/pems08.yaml
+python train.py --config configs/pems03_full.yaml
+python train.py --config configs/pems04_full.yaml
+python train.py --config configs/pems08_full.yaml
 ```
 
 指定设备（例如 CUDA）：

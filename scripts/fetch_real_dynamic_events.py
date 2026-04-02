@@ -11,6 +11,7 @@ Output CSV columns are compatible with scripts/build_dynamic_semantic_bank.py:
 - district
 - event_type
 - description
+- source
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import requests
 from requests.exceptions import RequestException
@@ -45,6 +47,7 @@ class EventRow:
     district: str
     event_type: str
     description: str
+    source: str
 
 
 def _time_context_label(ts: pd.Timestamp) -> str:
@@ -120,6 +123,7 @@ def fetch_openmeteo_weather(
                 district="global",
                 event_type="weather_context",
                 description="open-meteo hourly weather event",
+                source="open_meteo",
             )
         )
     return rows
@@ -175,6 +179,7 @@ def fetch_public_holidays(
                     district="global",
                     event_type="holiday_context",
                     description="public holiday event",
+                    source="nager_date",
                 )
             )
     return rows
@@ -436,21 +441,152 @@ def generate_poi_context_events(
                 district="global",
                 event_type="poi_context",
                 description="derived from OSM POI distribution and activity schedule",
+                source="osm_overpass",
             )
         )
     return rows
 
 
+def _load_sensor_points(
+    sensor_metadata_csv: Path,
+    idx_col: str,
+    lat_col: str,
+    lon_col: str,
+) -> pd.DataFrame:
+    """Load sensor geolocation table for incident-to-sensor mapping."""
+    df = pd.read_csv(sensor_metadata_csv)
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    i_col = idx_col.strip().lower()
+    la_col = lat_col.strip().lower()
+    lo_col = lon_col.strip().lower()
+    if not {i_col, la_col, lo_col}.issubset(df.columns):
+        raise ValueError(
+            f"sensor_metadata_csv must contain {i_col},{la_col},{lo_col}. "
+            f"available={list(df.columns)}"
+        )
+
+    out = pd.DataFrame(
+        {
+            "node_index": pd.to_numeric(df[i_col], errors="coerce"),
+            "lat": pd.to_numeric(df[la_col], errors="coerce"),
+            "lon": pd.to_numeric(df[lo_col], errors="coerce"),
+        }
+    )
+    out = out.dropna(subset=["node_index", "lat", "lon"]).copy()
+    out["node_index"] = out["node_index"].astype(int)
+    out = out.drop_duplicates(subset=["node_index"], keep="first").reset_index(drop=True)
+    if out.empty:
+        raise ValueError("No valid sensor coordinates found in sensor_metadata_csv.")
+    return out
+
+
+def _load_graph_neighbors(adjacency_csv: Path, num_nodes: int) -> Dict[int, List[int]]:
+    """Load undirected graph neighbors from adjacency csv."""
+    if not adjacency_csv.exists():
+        return {}
+    edges = pd.read_csv(adjacency_csv)
+    edges.columns = [str(c).strip().lower().replace(" ", "_") for c in edges.columns]
+    src_col = "src" if "src" in edges.columns else ("from" if "from" in edges.columns else None)
+    dst_col = "dst" if "dst" in edges.columns else ("to" if "to" in edges.columns else None)
+    if src_col is None or dst_col is None:
+        return {}
+
+    neighbors: Dict[int, List[int]] = {i: [] for i in range(int(num_nodes))}
+    for _, row in edges.iterrows():
+        s = pd.to_numeric(row[src_col], errors="coerce")
+        d = pd.to_numeric(row[dst_col], errors="coerce")
+        if pd.isna(s) or pd.isna(d):
+            continue
+        si = int(s)
+        di = int(d)
+        if 0 <= si < num_nodes and 0 <= di < num_nodes:
+            neighbors[si].append(di)
+            neighbors[di].append(si)
+    return neighbors
+
+
+def _bfs_within_hops(neighbors: Dict[int, List[int]], start: int, max_hops: int) -> set[int]:
+    """Get reachable node set within hop budget."""
+    if max_hops < 0:
+        return set(neighbors.keys())
+    seen = {int(start)}
+    frontier = {int(start)}
+    for _ in range(int(max_hops)):
+        nxt: set[int] = set()
+        for u in frontier:
+            for v in neighbors.get(u, []):
+                if v not in seen:
+                    nxt.add(v)
+                    seen.add(v)
+        if not nxt:
+            break
+        frontier = nxt
+    return seen
+
+
+def _haversine_m(lat: float, lon: float, lat_arr: np.ndarray, lon_arr: np.ndarray) -> np.ndarray:
+    """Vectorized haversine distance in meters."""
+    r = 6371000.0
+    phi1 = np.deg2rad(lat)
+    phi2 = np.deg2rad(lat_arr)
+    dphi = np.deg2rad(lat_arr - lat)
+    dlambda = np.deg2rad(lon_arr - lon)
+    a = np.sin(dphi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * (np.sin(dlambda / 2.0) ** 2)
+    c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(np.maximum(1.0 - a, 1e-12)))
+    return r * c
+
+
+def _map_incident_nodes(
+    lat: float,
+    lon: float,
+    sensor_points: pd.DataFrame,
+    radius_m: float,
+    neighbors: Optional[Dict[int, List[int]]] = None,
+    topology_hops: int = 3,
+) -> List[int]:
+    """Map one incident location to sensor indices via geo + optional topology filter."""
+    lat_arr = sensor_points["lat"].to_numpy(dtype=np.float64)
+    lon_arr = sensor_points["lon"].to_numpy(dtype=np.float64)
+    node_arr = sensor_points["node_index"].to_numpy(dtype=np.int64)
+    dist = _haversine_m(lat=lat, lon=lon, lat_arr=lat_arr, lon_arr=lon_arr)
+
+    in_radius_mask = dist <= float(radius_m)
+    if not bool(np.any(in_radius_mask)):
+        return []
+
+    in_radius_nodes = node_arr[in_radius_mask]
+    # Use nearest sensor as corridor anchor for topology pruning.
+    nearest_node = int(node_arr[int(np.argmin(dist))])
+
+    if neighbors:
+        allowed = _bfs_within_hops(neighbors=neighbors, start=nearest_node, max_hops=topology_hops)
+        topo_nodes = [int(x) for x in in_radius_nodes.tolist() if int(x) in allowed]
+        if topo_nodes:
+            return sorted(set(topo_nodes))
+
+    return sorted(set([int(x) for x in in_radius_nodes.tolist()]))
+
+
 def load_optional_incidents_csv(
     incidents_csv: Optional[Path],
     timezone: str,
+    sensor_metadata_csv: Optional[Path] = None,
+    sensor_idx_col: str = "node_index",
+    sensor_lat_col: str = "latitude",
+    sensor_lon_col: str = "longitude",
+    incident_lat_col: str = "latitude",
+    incident_lon_col: str = "longitude",
+    incident_radius_m: float = 2000.0,
+    adjacency_csv: Optional[Path] = None,
+    topology_hops: int = 3,
 ) -> List[EventRow]:
     """Load optional local incidents CSV.
 
     Expected columns:
     - timestamp (required)
     - description or text (required one)
-    - node_index (optional, default -1)
+    - node_index (optional)
+    - latitude/longitude (optional; used for geo mapping when node_index is absent)
     - district (optional)
     """
     if incidents_csv is None:
@@ -466,32 +602,76 @@ def load_optional_incidents_csv(
     if "description" not in df.columns and "text" not in df.columns:
         raise ValueError("incidents_csv must contain 'description' or 'text' column")
 
+    sensor_points: Optional[pd.DataFrame] = None
+    neighbors: Optional[Dict[int, List[int]]] = None
+    if sensor_metadata_csv is not None:
+        if not sensor_metadata_csv.exists():
+            raise FileNotFoundError(f"sensor_metadata_csv not found: {sensor_metadata_csv}")
+        sensor_points = _load_sensor_points(
+            sensor_metadata_csv=sensor_metadata_csv,
+            idx_col=sensor_idx_col,
+            lat_col=sensor_lat_col,
+            lon_col=sensor_lon_col,
+        )
+        if adjacency_csv is not None:
+            neighbors = _load_graph_neighbors(
+                adjacency_csv=adjacency_csv,
+                num_nodes=int(sensor_points["node_index"].max()) + 1,
+            )
+
     rows: List[EventRow] = []
+    idx_col = "node_index"
+    lat_col = incident_lat_col.strip().lower()
+    lon_col = incident_lon_col.strip().lower()
     for _, r in df.iterrows():
         ts = pd.to_datetime(r["timestamp"], errors="coerce")
         if pd.isna(ts):
             continue
 
         desc = str(r.get("description", r.get("text", "incident")))
-        node_idx = int(r.get("node_index", -1)) if pd.notna(r.get("node_index", -1)) else -1
         district = str(r.get("district", "global"))
         time_ctx = _time_context_label(pd.Timestamp(ts))
         text = f"incident: {desc}; time_context: {time_ctx}"
 
-        rows.append(
-            EventRow(
-                timestamp=pd.Timestamp(ts),
-                node_index=node_idx,
-                text=text,
-                weather="unknown",
-                incident=desc,
-                holiday="no",
-                time_context=time_ctx,
-                district=district,
-                event_type="incident_context",
-                description=desc,
+        mapped_nodes: List[int] = []
+        node_raw = r.get(idx_col, None)
+        if pd.notna(node_raw):
+            try:
+                mapped_nodes = [int(float(node_raw))]
+            except (TypeError, ValueError):
+                mapped_nodes = []
+
+        if (not mapped_nodes) and (sensor_points is not None) and (lat_col in df.columns) and (lon_col in df.columns):
+            lat_raw = pd.to_numeric(r.get(lat_col), errors="coerce")
+            lon_raw = pd.to_numeric(r.get(lon_col), errors="coerce")
+            if pd.notna(lat_raw) and pd.notna(lon_raw):
+                mapped_nodes = _map_incident_nodes(
+                    lat=float(lat_raw),
+                    lon=float(lon_raw),
+                    sensor_points=sensor_points,
+                    radius_m=float(incident_radius_m),
+                    neighbors=neighbors,
+                    topology_hops=int(topology_hops),
+                )
+        if not mapped_nodes:
+            mapped_nodes = [-1]
+
+        for node_idx in mapped_nodes:
+            rows.append(
+                EventRow(
+                    timestamp=pd.Timestamp(ts),
+                    node_index=int(node_idx),
+                    text=text,
+                    weather="unknown",
+                    incident=desc,
+                    holiday="no",
+                    time_context=time_ctx,
+                    district=district,
+                    event_type="incident_context",
+                    description=desc,
+                    source="incident_csv",
+                )
             )
-        )
     return rows
 
 
@@ -536,6 +716,25 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional local incidents CSV to merge",
     )
+    parser.add_argument(
+        "--sensor_metadata_csv",
+        type=Path,
+        default=None,
+        help="Optional sensor metadata CSV with node_index+latitude+longitude for incident mapping.",
+    )
+    parser.add_argument("--sensor_idx_col", type=str, default="node_index")
+    parser.add_argument("--sensor_lat_col", type=str, default="latitude")
+    parser.add_argument("--sensor_lon_col", type=str, default="longitude")
+    parser.add_argument("--incident_lat_col", type=str, default="latitude")
+    parser.add_argument("--incident_lon_col", type=str, default="longitude")
+    parser.add_argument("--incident_radius_m", type=float, default=2000.0)
+    parser.add_argument(
+        "--adjacency_csv",
+        type=Path,
+        default=None,
+        help="Optional adjacency.csv for topology-aware incident filtering.",
+    )
+    parser.add_argument("--topology_hops", type=int, default=3)
     parser.add_argument("--timeout_sec", type=int, default=30)
     return parser.parse_args()
 
@@ -564,6 +763,15 @@ def main() -> None:
     incident_rows = load_optional_incidents_csv(
         incidents_csv=args.incidents_csv,
         timezone=args.timezone,
+        sensor_metadata_csv=args.sensor_metadata_csv,
+        sensor_idx_col=str(args.sensor_idx_col),
+        sensor_lat_col=str(args.sensor_lat_col),
+        sensor_lon_col=str(args.sensor_lon_col),
+        incident_lat_col=str(args.incident_lat_col),
+        incident_lon_col=str(args.incident_lon_col),
+        incident_radius_m=float(args.incident_radius_m),
+        adjacency_csv=args.adjacency_csv,
+        topology_hops=int(args.topology_hops),
     )
 
     poi_rows: List[EventRow] = []

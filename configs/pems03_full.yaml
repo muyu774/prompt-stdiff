@@ -1,0 +1,14 @@
+defaults:
+  - pems03.yaml
+
+experiment:
+  name: pems03_full_semantic
+
+dataset:
+  dynamic_semantic:
+    enabled: true
+    strict_truncation: true
+
+model:
+  gamma: 0.35
+  # ASSUMPTION: full setting uses paper-style semantic-guided initialization.

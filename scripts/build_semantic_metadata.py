@@ -1,6 +1,10 @@
 """Build semantic metadata CSV from node mapping for prompt construction.
 
 Use this script to create a richer metadata table consumed by semantic/offline_encoder.py.
+Modes:
+- template: create empty editable fields.
+- weak_labels: derive coarse labels from graph degree (ASSUMPTION).
+- external_match: deterministic merge from external static metadata table.
 """
 
 from __future__ import annotations
@@ -14,12 +18,27 @@ import pandas as pd
 
 
 DIRECTIONS = ["northbound", "southbound", "eastbound", "westbound"]
+SEMANTIC_COLUMNS = [
+    "road_name",
+    "road_type",
+    "direction",
+    "district",
+    "functional_region",
+    "poi_category",
+    "traffic_pattern_hint",
+]
 
 
 def _safe_read_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(path)
     return pd.read_csv(path)
+
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out.columns = [str(c).strip().lower().replace(" ", "_") for c in out.columns]
+    return out
 
 
 def _compute_degree(num_nodes: int, adjacency_csv: Path) -> np.ndarray:
@@ -87,12 +106,57 @@ def _label_by_degree(deg: np.ndarray) -> Dict[str, List[str]]:
     }
 
 
+def _merge_external_metadata(base_df: pd.DataFrame, external_csv: Path) -> pd.DataFrame:
+    """Merge external static semantic metadata by node key.
+
+    ASSUMPTION: external metadata provides deterministic node-level attributes from
+    public road-network/POI processing pipeline.
+    """
+    ext = _normalize_columns(_safe_read_csv(external_csv))
+    if ("node_index" not in ext.columns) and ("node_id" not in ext.columns):
+        raise ValueError(
+            "external_csv must contain either node_index or node_id for deterministic matching."
+        )
+
+    available_sem_cols = [c for c in SEMANTIC_COLUMNS if c in ext.columns]
+    if not available_sem_cols:
+        raise ValueError(
+            f"external_csv has no semantic columns. Expected at least one of {SEMANTIC_COLUMNS}."
+        )
+
+    base = base_df.copy()
+    if "node_index" in ext.columns:
+        ext2 = ext[["node_index"] + available_sem_cols].copy()
+        ext2["node_index"] = pd.to_numeric(ext2["node_index"], errors="coerce")
+        base["node_index"] = pd.to_numeric(base["node_index"], errors="coerce")
+        merged = base.merge(ext2, on="node_index", how="left", suffixes=("", "_ext"))
+    else:
+        ext2 = ext[["node_id"] + available_sem_cols].copy()
+        ext2["node_id"] = ext2["node_id"].astype(str)
+        base["node_id"] = base["node_id"].astype(str)
+        merged = base.merge(ext2, on="node_id", how="left", suffixes=("", "_ext"))
+
+    for col in SEMANTIC_COLUMNS:
+        ext_col = f"{col}_ext"
+        if ext_col in merged.columns:
+            merged[col] = merged[ext_col].where(
+                merged[ext_col].notna() & (merged[ext_col].astype(str).str.strip() != ""),
+                merged.get(col, ""),
+            )
+            merged = merged.drop(columns=[ext_col])
+        elif col not in merged.columns:
+            merged[col] = ""
+
+    return merged
+
+
 def build_metadata(
     node_mapping_csv: Path,
     out_csv: Path,
     adjacency_csv: Path | None,
     mode: str,
     district_bins: int,
+    external_csv: Path | None,
 ) -> None:
     """Build output metadata table for semantic prompt generation."""
     df = _safe_read_csv(node_mapping_csv).copy()
@@ -118,11 +182,17 @@ def build_metadata(
             "morning commuter traffic is common" if x == "commuter_corridor" else "traffic is relatively stable outside rush hour"
             for x in df["functional_region"].tolist()
         ]
-    else:
+    elif mode == "template":
         # template mode: leave semantic slots blank for manual editing.
         df["road_type"] = ""
         df["functional_region"] = ""
         df["poi_category"] = ""
+    elif mode == "external_match":
+        if external_csv is None:
+            raise ValueError("--external_csv is required when mode=external_match")
+        df = _merge_external_metadata(base_df=df, external_csv=external_csv)
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_csv, index=False)
@@ -135,7 +205,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--node_mapping_csv", type=Path, required=True)
     parser.add_argument("--out_csv", type=Path, required=True)
     parser.add_argument("--adjacency_csv", type=Path, default=None)
-    parser.add_argument("--mode", type=str, default="template", choices=["template", "weak_labels"])
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="template",
+        choices=["template", "weak_labels", "external_match"],
+    )
+    parser.add_argument(
+        "--external_csv",
+        type=Path,
+        default=None,
+        help="External static metadata table used when mode=external_match.",
+    )
     parser.add_argument("--district_bins", type=int, default=4)
     return parser.parse_args()
 
@@ -148,6 +229,7 @@ def main() -> None:
         adjacency_csv=args.adjacency_csv,
         mode=args.mode,
         district_bins=int(args.district_bins),
+        external_csv=args.external_csv,
     )
 
 

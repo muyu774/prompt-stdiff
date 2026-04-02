@@ -37,16 +37,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_semantic(config: dict) -> np.ndarray:
-    """Load semantic embedding cache."""
+    """Load semantic embedding cache with strict/fallback policy."""
     dcfg = config["dataset"]
     mcfg = config["model"]
     data_root = Path(dcfg["data_root"]) / dcfg["name"]
     sem_path = data_root / dcfg["semantic_embedding_file"]
+    semantic_required = bool(dcfg.get("semantic_required", True))
+    allow_fallback = bool(dcfg.get("allow_random_semantic_fallback", False))
 
     if sem_path.exists():
         return load_semantic_embeddings(sem_path)
 
-    # ASSUMPTION: evaluation fallback uses deterministic random semantic vectors.
+    if semantic_required and (not allow_fallback):
+        raise FileNotFoundError(
+            f"Semantic embeddings are required but missing: {sem_path}. "
+            "Please generate semantic cache before evaluation."
+        )
+
+    # ASSUMPTION: evaluation fallback is only for debug/dry-run.
     rng = np.random.default_rng(seed=0)
     return rng.standard_normal((int(dcfg["num_nodes"]), int(mcfg["sem_dim"]))).astype(np.float32)
 

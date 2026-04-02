@@ -3,6 +3,10 @@ dataset:
   data_root: ./data
   data_file: data.npz
   adjacency_file: adjacency.csv
+  semantic_required: true
+  allow_random_semantic_fallback: false
+  # ASSUMPTION: paper-facing runs should fail fast when semantic cache is missing.
+  # Set allow_random_semantic_fallback=true only for dry-run debugging.
   physical_sigma: auto
   physical_norm_mode: sym
   semantic_embedding_file: semantic_embeddings.npy

@@ -5,6 +5,10 @@ Output NPZ contains:
 - step_idx: [E]
 - node_index: [E] (-1 for global events)
 - embedding: [E, D]
+- event_type_id: [E]
+- source_id: [E]
+- event_type_vocab: [C1]
+- source_vocab: [C2]
 """
 
 from __future__ import annotations
@@ -52,6 +56,16 @@ def _compose_event_text(row: pd.Series, text_col: Optional[str], fields: List[st
     return "; ".join(parts)
 
 
+def _encode_categories(values: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    """Encode string categories to integer ids with a deterministic vocabulary."""
+    vals = values.fillna("unknown").astype(str)
+    vocab = sorted(set(vals.tolist()))
+    lookup = {v: i for i, v in enumerate(vocab)}
+    ids = np.asarray([lookup[v] for v in vals.tolist()], dtype=np.int64)
+    vocab_arr = np.asarray(vocab, dtype="<U64")
+    return ids, vocab_arr
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build dynamic semantic bank")
     parser.add_argument("--events_csv", type=Path, required=True)
@@ -60,10 +74,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time_col", type=str, default="timestamp")
     parser.add_argument("--text_col", type=str, default="text")
     parser.add_argument("--node_col", type=str, default="node_index")
+    parser.add_argument("--event_type_col", type=str, default="event_type")
+    parser.add_argument("--source_col", type=str, default="source")
     parser.add_argument(
         "--fields",
         type=str,
-        default="weather,incident,holiday,time_context,district,event_type,description",
+        default="weather,incident,holiday,time_context,district,event_type,description,source",
         help="Fallback columns used to compose text when text_col is empty.",
     )
     parser.add_argument("--start_time", type=str, required=True, help="Timeline origin, e.g. 2018-01-01 00:00:00")
@@ -99,6 +115,8 @@ def main() -> None:
     time_col = args.time_col.strip().lower()
     text_col = args.text_col.strip().lower() if args.text_col else None
     node_col = args.node_col.strip().lower() if args.node_col else None
+    event_type_col = args.event_type_col.strip().lower() if args.event_type_col else None
+    source_col = args.source_col.strip().lower() if args.source_col else None
     fields = [x.strip().lower() for x in args.fields.split(",") if x.strip()]
 
     if time_col not in df.columns:
@@ -143,6 +161,18 @@ def main() -> None:
         # ASSUMPTION: missing node column means global events.
         node_vals = np.full((len(df),), -1, dtype=np.int64)
 
+    if event_type_col is not None and event_type_col in df.columns:
+        event_type_id, event_type_vocab = _encode_categories(df[event_type_col])
+    else:
+        event_type_id = np.zeros((len(df),), dtype=np.int64)
+        event_type_vocab = np.asarray(["unknown"], dtype="<U64")
+
+    if source_col is not None and source_col in df.columns:
+        source_id, source_vocab = _encode_categories(df[source_col])
+    else:
+        source_id = np.zeros((len(df),), dtype=np.int64)
+        source_vocab = np.asarray(["unknown"], dtype="<U64")
+
     model = SentenceTransformer(args.model_name)
     emb = model.encode(
         texts,
@@ -158,12 +188,18 @@ def main() -> None:
         step_idx=step_idx.astype(np.int64),
         node_index=node_vals.astype(np.int64),
         embedding=emb,
+        event_type_id=event_type_id.astype(np.int64),
+        source_id=source_id.astype(np.int64),
+        event_type_vocab=event_type_vocab,
+        source_vocab=source_vocab,
     )
 
     print(f"Saved dynamic semantic bank: {args.out_npz}")
     print(f"events={len(step_idx)} dim={emb.shape[1]}")
     print(f"step_idx range=({int(step_idx.min())}, {int(step_idx.max())})")
     print(f"global_event_ratio={(node_vals < 0).mean():.4f}")
+    print(f"event_type_vocab={event_type_vocab.tolist()}")
+    print(f"source_vocab={source_vocab.tolist()}")
 
 
 if __name__ == "__main__":

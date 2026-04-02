@@ -42,10 +42,18 @@ def _load_semantic(config: dict) -> np.ndarray:
     mcfg = config["model"]
     root = Path(dcfg["data_root"]) / dcfg["name"]
     sem_file = root / dcfg["semantic_embedding_file"]
+    semantic_required = bool(dcfg.get("semantic_required", True))
+    allow_fallback = bool(dcfg.get("allow_random_semantic_fallback", False))
     if sem_file.exists():
         return load_semantic_embeddings(sem_file)
 
-    # ASSUMPTION: fallback random semantic embeddings for inference-only dry run.
+    if semantic_required and (not allow_fallback):
+        raise FileNotFoundError(
+            f"Semantic embeddings are required but missing: {sem_file}. "
+            "Please generate semantic cache before inference."
+        )
+
+    # ASSUMPTION: fallback random semantic embeddings are only for debug/dry run.
     return np.random.randn(int(dcfg["num_nodes"]), int(mcfg["sem_dim"])).astype(np.float32)
 
 

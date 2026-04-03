@@ -1,0 +1,17 @@
+defaults:
+  - pems08_target13.yaml
+
+experiment:
+  name: pems08_debug_nosem_h3
+
+dataset:
+  # No-semantic ablation for diagnosis:
+  # z_sem = 0, A_sem = I (prepared by scripts below).
+  semantic_embedding_file: semantic_embeddings_zero.npy
+  semantic_graph_file: A_sem_identity.npy
+  semantic_graph_raw_file: A_sem_identity.npy
+  dynamic_semantic:
+    enabled: false
+
+model:
+  gamma: 0.0

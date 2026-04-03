@@ -73,6 +73,8 @@ class Trainer:
             if max_eval_batches_cfg is not None
             else None
         )
+        self.full_eval_every = int(tcfg.get("full_eval_every", 0))
+        self.full_eval_num_samples = int(tcfg.get("full_eval_num_samples", self.num_eval_samples))
         # ASSUMPTION: update last checkpoint every epoch to avoid losing progress on interruption.
         self.save_last_every_epoch = bool(tcfg.get("save_last_every_epoch", True))
         self.eval_horizons = [int(x) for x in tcfg.get("eval_horizons", [3, 6, 12])]
@@ -158,6 +160,71 @@ class Trainer:
 
                 if val_metrics["mae"] < self.best_mae:
                     self.best_mae = val_metrics["mae"]
+                    save_checkpoint(
+                        path=self.save_dir / "best.pt",
+                        model=self.model,
+                        optimizer=self.optimizer,
+                        epoch=epoch,
+                        best_metric=self.best_mae,
+                        config=self.config,
+                    )
+
+            # Optional full validation pass (all val batches + larger MC samples).
+            # Useful when fast in-training validation uses subset batches.
+            if self.full_eval_every > 0 and (epoch % self.full_eval_every == 0):
+                self.logger.info(
+                    "Epoch %d | start FULL validation (val_batches=%d, nsample=%d, diffusion_steps=%d, max_batches=all)",
+                    epoch,
+                    len(self.val_loader),
+                    self.full_eval_num_samples,
+                    int(self.process.num_steps),
+                )
+                t1 = time.time()
+                full_metrics = evaluate(
+                    model=self.model,
+                    sampler=self.sampler,
+                    data_loader=self.val_loader,
+                    a_phy=self.a_phy,
+                    a_sem=self.a_sem,
+                    z_sem=self.z_sem,
+                    device=self.device,
+                    scaler=self.scaler_obj,
+                    num_crps_samples=self.full_eval_num_samples,
+                    dynamic_bank=self.dynamic_bank,
+                    eval_horizons=self.eval_horizons,
+                    logger=self.logger,
+                    log_interval=max(1, len(self.val_loader) // 10),
+                    max_batches=None,
+                    metric_feature_index=self.metric_feature_index,
+                    mape_eps=self.mape_eps,
+                    mape_mask_threshold=self.mape_mask_threshold,
+                )
+                self.logger.info("Epoch %d | FULL validation finished in %.2fs", epoch, time.time() - t1)
+                self.logger.info(
+                    "Epoch %d | full_val_mae=%.6f full_val_rmse=%.6f full_val_mape=%.6f full_val_crps=%.6f",
+                    epoch,
+                    full_metrics["mae"],
+                    full_metrics["rmse"],
+                    full_metrics["mape"],
+                    full_metrics["crps"],
+                )
+                for h in self.eval_horizons:
+                    k_mae = f"mae@{h}"
+                    k_rmse = f"rmse@{h}"
+                    k_crps = f"crps@{h}"
+                    if k_mae in full_metrics and k_rmse in full_metrics and k_crps in full_metrics:
+                        self.logger.info(
+                            "Epoch %d | FULL horizon=%d | MAE=%.6f RMSE=%.6f CRPS=%.6f",
+                            epoch,
+                            h,
+                            full_metrics[k_mae],
+                            full_metrics[k_rmse],
+                            full_metrics[k_crps],
+                        )
+
+                # Prefer best checkpoint judged by full validation when available.
+                if full_metrics["mae"] < self.best_mae:
+                    self.best_mae = full_metrics["mae"]
                     save_checkpoint(
                         path=self.save_dir / "best.pt",
                         model=self.model,

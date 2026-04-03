@@ -32,6 +32,8 @@ train:
   train_num_eval_samples: 20
   max_eval_batches: 20
   num_eval_samples: 20
+  full_eval_every: 10
+  full_eval_num_samples: 100
   eval_horizons: [3]
   metric_feature_index: 0
   loss_eps_weight: 1.0

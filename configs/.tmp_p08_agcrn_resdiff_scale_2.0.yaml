@@ -1,0 +1,36 @@
+defaults:
+- pems08.yaml
+dataset:
+  input_dim: 1
+  history_steps: 24
+  horizon_steps: 12
+model:
+  predict_residual: false
+  use_semantic: true
+  use_mean_head: false
+  center_residual_samples: true
+  residual_sample_scale: 2.0
+  gamma: 0.3
+mean_predictor:
+  type: agcrn
+  freeze: true
+  source_config: configs/pems08.yaml
+  pretrained_ckpt: outputs/checkpoints/agcrn/pems08/agcrn_original/best.pt
+  agcrn_repo: baselines/external_repos/AGCRN
+  skip_agcrn_init: false
+  residual_standardize: true
+  residual_stats_file: outputs/residual_stats/residual_stats_pems08_agcrn_h12.npz
+  residual_stats_recompute: false
+  use_semantic: false
+  baseline:
+    input_feature_index: 0
+    use_semantic: false
+diffusion:
+  clip_x0: true
+train:
+  lr: 0.001
+  loss_eps_weight: 1.0
+  loss_x0_weight: 0.5
+  loss_mean_weight: 0.0
+  metric_feature_index: 0
+  save_dir: ./outputs/checkpoints/pems08_agcrn_resdiff

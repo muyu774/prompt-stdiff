@@ -40,11 +40,13 @@ class EpsilonTheta(nn.Module):
         num_layers: int = 3,
         dropout: float = 0.1,
         semantic_dropout_p: float = 0.1,
+        use_semantic: bool = True,
     ) -> None:
         super().__init__()
         self.horizon_steps = horizon_steps
         self.hidden_dim = hidden_dim
         self.semantic_dropout_p = float(semantic_dropout_p)
+        self.use_semantic = bool(use_semantic)
 
         self.temporal_encoder = TemporalEncoder(
             input_dim=input_dim,
@@ -141,14 +143,19 @@ class EpsilonTheta(nn.Module):
         b, h, n, f = x_t.shape
 
         z = self._expand_z_sem(z_sem, batch_size=b)
-        z = self._semantic_dropout(z)
+        if self.use_semantic:
+            z = self._semantic_dropout(z)
+            a_sem_eff = a_sem
+        else:
+            z = torch.zeros_like(z)
+            a_sem_eff = torch.zeros_like(a_sem)
 
         h_time = self.temporal_encoder(x_his=x_his)  # [B, H, N, C]
         h_traffic = self.traffic_encoder(
             x_t=x_t,
             h_time=h_time,
             a_phy=a_phy,
-            a_sem=a_sem,
+            a_sem=a_sem_eff,
         )
 
         h_sem = self._build_sem_branch(z_sem=z, t=t, horizon=h)

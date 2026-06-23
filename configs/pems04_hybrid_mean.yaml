@@ -1,0 +1,24 @@
+defaults:
+  - pems04.yaml
+
+dataset:
+  input_dim: 1
+  history_steps: 24
+  horizon_steps: 12
+
+model:
+  predict_residual: true
+  use_mean_head: true
+  mean_head_hidden_dim: 128
+  mean_head_detach_for_diffusion: true
+  gamma: 0.1
+
+diffusion:
+  clip_x0: true
+
+train:
+  lr: 2.0e-4
+  loss_mean_weight: 2.0
+  loss_mean_type: huber
+  metric_feature_index: 0
+  save_dir: ./outputs/checkpoints/pems04_hybrid_mean

@@ -1,0 +1,8 @@
+defaults:
+- pems04_agcrn_resdiff.yaml
+model:
+  use_semantic: false
+  center_residual_samples: true
+  residual_sample_scale: 4.0
+train:
+  save_dir: ./outputs/checkpoints/pems04_agcrn_resdiff_nosem

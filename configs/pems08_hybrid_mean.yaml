@@ -1,0 +1,19 @@
+defaults:
+  - pems08.yaml
+
+model:
+  predict_residual: true
+  use_mean_head: true
+  mean_head_hidden_dim: 128
+  mean_head_detach_for_diffusion: true
+  gamma: 0.3
+
+diffusion:
+  clip_x0: true
+
+train:
+  lr: 2.0e-4
+  loss_mean_weight: 2.0
+  loss_mean_type: huber
+  metric_feature_index: 0
+  save_dir: ./outputs/checkpoints/pems08_hybrid_mean

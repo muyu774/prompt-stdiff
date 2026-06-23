@@ -3,5 +3,6 @@ diffusion:
   beta_schedule: linear
   beta_start: 1.0e-4
   beta_end: 0.02
+  sampler: ddpm
   sampling_steps: 50
   clip_x0: true

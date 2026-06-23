@@ -1,0 +1,13 @@
+defaults:
+  - pems08.yaml
+
+model:
+  predict_residual: true
+  gamma: 0.3
+
+diffusion:
+  clip_x0: true
+
+train:
+  lr: 2.0e-4
+  metric_feature_index: 0

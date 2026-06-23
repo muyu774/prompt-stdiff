@@ -1,0 +1,112 @@
+dataset:
+  name: pems08
+  data_root: ./data
+  data_file: data.npz
+  adjacency_file: adjacency.csv
+  semantic_required: true
+  allow_random_semantic_fallback: false
+  physical_sigma: auto
+  physical_norm_mode: sym
+  semantic_embedding_file: semantic_embeddings.npy
+  semantic_graph_file: A_sem_norm.npy
+  semantic_graph_raw_file: A_sem.npy
+  semantic_graph_norm_mode: sym
+  semantic_top_k: 20
+  semantic_graph_rebuild: false
+  num_nodes: 170
+  input_dim: 1
+  time_freq_minutes: 5
+  history_steps: 24
+  horizon_steps: 12
+  batch_size: 32
+  num_workers: 4
+  train_shuffle: true
+  train_ratio: 0.6
+  val_ratio: 0.2
+  test_ratio: 0.2
+  scaler: standard
+  scaler_mode: per_node
+  pems_supported:
+  - pems03
+  - pems04
+  - pems08
+  dynamic_semantic:
+    enabled: false
+    bank_file: dynamic_semantic_bank.npz
+    fusion_alpha: 0.35
+    recency_tau_steps: 288
+    strict_truncation: true
+    availability:
+      regime: full
+      incident_lag_minutes: 0
+      weather_forecast_scale: 0.75
+model:
+  hidden_dim: 128
+  time_embed_dim: 128
+  sem_dim: 1024
+  num_layers: 3
+  dropout: 0.1
+  semantic_dropout_p: 0.1
+  router_hidden_dim: 128
+  learn_mu_prior: false
+  learn_sigma_prior: false
+  predict_residual: false
+  gamma: 0.0
+  gamma_schedule: constant
+  use_semantic: false
+  use_mean_head: false
+  center_residual_samples: true
+  residual_sample_scale: 1.08
+  use_hetero_residual_scale: true
+  hetero_scale_hidden_dim: 128
+  hetero_scale_min: 0.15
+  hetero_scale_max: 8.0
+  hetero_scale_use_semantic: false
+diffusion:
+  num_steps: 50
+  beta_schedule: linear
+  beta_start: 0.0001
+  beta_end: 0.02
+  sampler: ddpm
+  sampling_steps: 50
+  clip_x0: false
+train:
+  seed: 42
+  epochs: 50
+  lr: 0.001
+  weight_decay: 1.0e-05
+  grad_clip: 5.0
+  log_interval: 50
+  eval_interval: 1
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff_hetero_nosem
+  mixed_precision: false
+  save_last_every_epoch: true
+  train_num_eval_samples: 20
+  max_eval_batches: 20
+  num_eval_samples: 20
+  eval_horizons:
+  - 3
+  - 6
+  - 12
+  metric_feature_index: 0
+  mape_eps: 1.0e-05
+  mape_mask_threshold: 1.0
+  loss_eps_weight: 1.0
+  loss_x0_weight: 0.5
+  loss_x0_type: l1
+  loss_mean_weight: 0.0
+  loss_residual_scale_weight: 0.05
+experiment:
+  name: prompt_stdiff_pems
+  output_dir: ./outputs
+mean_predictor:
+  type: pdformer
+  freeze: true
+  source_config: configs/pems08.yaml
+  pretrained_ckpt: outputs/checkpoints/pdformer_mean/pems08/time_pdformer_e96_d4_s43_gpu2/best.pt
+  pdformer_repo: baselines/external_repos/PDFormer
+  residual_standardize: true
+  residual_stats_file: outputs/residual_stats/residual_stats_pems08_pdformer_e96_h12.npz
+  residual_stats_recompute: false
+  input_feature_index: 0
+  use_time_features: true

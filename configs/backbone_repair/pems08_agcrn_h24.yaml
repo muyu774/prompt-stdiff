@@ -1,0 +1,10 @@
+defaults:
+  - ../pems08.yaml
+
+dataset:
+  history_steps: 24
+  batch_size: 32
+
+train:
+  seed: 42
+  eval_horizons: [3, 6, 12]

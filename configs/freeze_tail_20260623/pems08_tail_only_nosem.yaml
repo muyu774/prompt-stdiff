@@ -1,0 +1,16 @@
+_base_:
+  - ../pems08_pdformer_resdiff_incident_tail_nosem.yaml
+model:
+  incident_tail_min_scale: 1.0
+  incident_tail_max_scale: 8.0
+  incident_tail_use_semantic: false
+train:
+  seed: 42
+  lr: 1.0e-3
+  loss_residual_scale_weight: 0.20
+  loss_residual_scale_type: student_t
+  init_checkpoint: outputs/checkpoints/pems08_pdformer_resdiff_hetero_nosem_nosem_hetero_lr1e3/last.pt
+  init_checkpoint_strict: false
+  freeze_except_prefixes:
+    - incident_tail_scale_head
+  save_dir: ./outputs/checkpoints/pems08_tail_only_nosem

@@ -17,6 +17,13 @@ from graph.graph_utils import to_torch
 from graph.physical_graph import load_or_build_physical_graph
 from graph.semantic_graph import load_or_build_semantic_graph
 from models.prompt_stdiff import PromptSTDiff
+from models.mean_predictor import (
+    MeanPredictor,
+    compute_or_load_residual_standardizer,
+    get_mean_predictor_config,
+    residual_stats_path_from_config,
+)
+from semantic.availability import wrap_dynamic_bank_from_config
 from semantic.dynamic_context import maybe_load_dynamic_semantic_bank
 from semantic.semantic_cache import load_semantic_embeddings
 from utils.checkpoint import load_checkpoint
@@ -80,6 +87,7 @@ def main() -> None:
     device = get_device(device_arg)
     root = Path(dcfg["data_root"]) / dcfg["name"]
     dynamic_bank = maybe_load_dynamic_semantic_bank(config, data_root=root, logger=logger)
+    dynamic_bank = wrap_dynamic_bank_from_config(dynamic_bank, config=config, data_root=root)
 
     a_phy_np = load_or_build_physical_graph(
         file_path=root / dcfg["adjacency_file"],
@@ -92,7 +100,7 @@ def main() -> None:
         graph_path=root / dcfg["semantic_graph_file"],
         z_sem=z_sem_np,
         top_k=int(dcfg["semantic_top_k"]),
-        rebuild=False,
+        rebuild=bool(dcfg.get("semantic_graph_rebuild", False)),
         normalize_mode=str(dcfg.get("semantic_graph_norm_mode", "sym")),
         raw_graph_path=(
             root / dcfg["semantic_graph_raw_file"]
@@ -121,6 +129,11 @@ def main() -> None:
         )
         dynamic_bank = None
 
+    mean_predictor = None
+    mean_predictor_cfg = dict(get_mean_predictor_config(config))
+    if mean_predictor_cfg.get("type"):
+        mean_predictor = MeanPredictor(config=config, device=device).to(device)
+
     model = PromptSTDiff(
         input_dim=int(dcfg["input_dim"]),
         sem_dim=sem_dim_data,
@@ -131,7 +144,54 @@ def main() -> None:
         num_layers=int(mcfg["num_layers"]),
         dropout=float(mcfg["dropout"]),
         semantic_dropout_p=float(mcfg.get("semantic_dropout_p", 0.1)),
+        use_semantic=bool(mcfg.get("use_semantic", True)),
+        use_mean_head=bool(mcfg.get("use_mean_head", False)),
+        mean_head_hidden_dim=(
+            int(mcfg["mean_head_hidden_dim"])
+            if mcfg.get("mean_head_hidden_dim") is not None
+            else None
+        ),
+        mean_predictor=mean_predictor,
+        center_residual_samples=bool(mcfg.get("center_residual_samples", False)),
+        residual_sample_scale=float(mcfg.get("residual_sample_scale", 1.0)),
+        residual_horizon_scale=mcfg.get("residual_horizon_scale", None),
+        residual_node_group_ids=mcfg.get("residual_node_group_ids", None),
+        residual_node_group_scale=mcfg.get("residual_node_group_scale", None),
+        use_hetero_residual_scale=bool(mcfg.get("use_hetero_residual_scale", False)),
+        hetero_scale_hidden_dim=(
+            int(mcfg["hetero_scale_hidden_dim"])
+            if mcfg.get("hetero_scale_hidden_dim") is not None
+            else None
+        ),
+        hetero_scale_min=float(mcfg.get("hetero_scale_min", 0.2)),
+        hetero_scale_max=float(mcfg.get("hetero_scale_max", 6.0)),
+        hetero_scale_use_semantic=(
+            bool(mcfg["hetero_scale_use_semantic"])
+            if mcfg.get("hetero_scale_use_semantic") is not None
+            else None
+        ),
+        use_incident_tail_scale=bool(mcfg.get("use_incident_tail_scale", False)),
+        incident_tail_hidden_dim=(
+            int(mcfg["incident_tail_hidden_dim"])
+            if mcfg.get("incident_tail_hidden_dim") is not None
+            else None
+        ),
+        incident_tail_min_scale=float(mcfg.get("incident_tail_min_scale", 0.85)),
+        incident_tail_max_scale=float(mcfg.get("incident_tail_max_scale", 4.0)),
+        incident_tail_use_semantic=bool(mcfg.get("incident_tail_use_semantic", True)),
+        incident_tail_df=float(mcfg.get("incident_tail_df", 3.0)),
     ).to(device)
+    if mean_predictor is not None and bool(mean_predictor_cfg.get("residual_standardize", True)):
+        model.set_residual_standardizer(
+            compute_or_load_residual_standardizer(
+                path=residual_stats_path_from_config(config),
+                mean_predictor=mean_predictor,
+                train_loader=artifacts.train_loader,
+                device=device,
+                force_recompute=False,
+                logger=logger,
+            )
+        )
 
     betas = build_beta_schedule(diff_cfg)
     process = DiffusionProcess(
@@ -153,9 +213,16 @@ def main() -> None:
         process=process,
         noise_prior=noise_prior,
         sampling_steps=int(diff_cfg.get("sampling_steps", diff_cfg["num_steps"])),
+        sampler_type=str(diff_cfg.get("sampler", "ddpm")),
     )
 
-    load_checkpoint(Path(args.ckpt), model=model, optimizer=None, map_location=str(device))
+    load_checkpoint(
+        Path(args.ckpt),
+        model=model,
+        optimizer=None,
+        map_location=str(device),
+        strict=mean_predictor is None,
+    )
     model.eval()
 
     preds = []
@@ -186,6 +253,28 @@ def main() -> None:
                 cond=cond,
                 device=device,
             )
+            if bool(getattr(model, "use_mean_head", False)):
+                mean_pred = model.predict_mean(
+                    x_his=x_his,
+                    a_phy=a_phy,
+                    a_sem=a_sem,
+                    z_sem=z_sem_batch,
+                    batch={
+                        "x_his": x_his,
+                        "x_fut": x_fut,
+                        "cutoff_step": cutoff_step,
+                    },
+                )
+                residual = model.unstandardize_residual(pred.unsqueeze(0))
+                residual = model.calibrate_residual_samples(residual, x_his=x_his, z_sem=z_sem_batch)
+                pred = residual.squeeze(0) + mean_pred
+            if (
+                bool(config.get("model", {}).get("predict_residual", False))
+                and not bool(getattr(model, "uses_absolute_mean_predictor", False))
+            ):
+                # ASSUMPTION: residual parameterization predicts deviations from
+                # the last observed normalized value.
+                pred = pred + x_his[:, -1:, :, :].expand(-1, h, -1, -1)
             if artifacts.scaler is not None:
                 pred_np = artifacts.scaler.inverse_transform(pred.detach().cpu().numpy())
             else:

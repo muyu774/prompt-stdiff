@@ -33,6 +33,7 @@ def load_checkpoint(
     model: torch.nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
     map_location: str = "cpu",
+    strict: bool = True,
 ) -> Tuple[int, float, Dict[str, Any]]:
     """Load checkpoint into model/optimizer.
 
@@ -40,7 +41,7 @@ def load_checkpoint(
         (epoch, best_metric, config)
     """
     ckpt = torch.load(path, map_location=map_location)
-    model.load_state_dict(ckpt["model"])
+    model.load_state_dict(ckpt["model"], strict=strict)
     if optimizer is not None and ckpt.get("optimizer") is not None:
         optimizer.load_state_dict(ckpt["optimizer"])
     epoch = int(ckpt.get("epoch", 0))

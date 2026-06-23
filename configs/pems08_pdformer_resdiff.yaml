@@ -1,0 +1,35 @@
+defaults:
+  - pems08.yaml
+
+dataset:
+  input_dim: 1
+  history_steps: 24
+  horizon_steps: 12
+
+model:
+  predict_residual: false
+  use_semantic: true
+  use_mean_head: false
+  center_residual_samples: true
+  residual_sample_scale: 2.0
+  gamma: 0.0
+
+mean_predictor:
+  type: pdformer
+  freeze: true
+  source_config: configs/pems08.yaml
+  pretrained_ckpt: outputs/checkpoints/pdformer_mean/pems08/time_pdformer_e96_d4_s43_gpu2/best.pt
+  pdformer_repo: baselines/external_repos/PDFormer
+  residual_standardize: true
+  residual_stats_file: outputs/residual_stats/residual_stats_pems08_pdformer_e96_h12.npz
+  residual_stats_recompute: false
+  input_feature_index: 0
+  use_time_features: true
+
+train:
+  lr: 1.0e-3
+  loss_eps_weight: 1.0
+  loss_x0_weight: 0.5
+  loss_mean_weight: 0.0
+  metric_feature_index: 0
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff

@@ -1,0 +1,17 @@
+defaults:
+  - pems08_pdformer_resdiff_hetero.yaml
+
+model:
+  use_semantic: true
+  hetero_scale_use_semantic: false
+  use_incident_tail_scale: true
+  incident_tail_hidden_dim: 128
+  incident_tail_min_scale: 0.75
+  incident_tail_max_scale: 4.0
+  incident_tail_use_semantic: true
+  incident_tail_df: 3.0
+
+train:
+  loss_residual_scale_weight: 0.08
+  loss_residual_scale_type: student_t
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff_incident_tail

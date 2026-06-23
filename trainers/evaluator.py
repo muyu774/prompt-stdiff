@@ -42,6 +42,7 @@ def evaluate(
     metric_feature_index: Optional[int] = None,
     mape_eps: float = 1e-5,
     mape_mask_threshold: float = 1.0,
+    predict_residual: bool = False,
 ) -> Dict[str, float]:
     """Evaluate model with MAE/RMSE/MAPE and CRPS."""
     model.eval()
@@ -50,6 +51,15 @@ def evaluate(
     target_list = []
     crps_list = []
     crps_by_h: Dict[int, List[float]] = {}
+    prob_metric_lists: Dict[str, List[float]] = {}
+    prob_metric_by_h: Dict[int, Dict[str, List[float]]] = {}
+
+    def _append_prob_metrics(bucket: Dict[str, List[float]], values: Dict[str, float]) -> None:
+        """Append probabilistic-only metrics while keeping point metric contract unchanged."""
+        for key, value in values.items():
+            if key in {"mae", "rmse", "mape"}:
+                continue
+            bucket.setdefault(key, []).append(float(value))
 
     def _select_metric_feature(x: torch.Tensor) -> torch.Tensor:
         if metric_feature_index is None:
@@ -87,16 +97,33 @@ def evaluate(
         }
 
         # CRPS and point metrics are both computed from the same Monte-Carlo ensemble.
-        sample_stack = []
-        for _ in range(max(num_crps_samples, 1)):
-            s = sampler.sample(
-                model_fn=model.model_fn,
-                shape=(b, h, n, f),
-                cond=cond,
-                device=device,
+        ensemble = sampler.sample_ensemble(
+            model_fn=model.model_fn,
+            shape=(b, h, n, f),
+            cond=cond,
+            device=device,
+            num_samples=max(num_crps_samples, 1),
+        )  # [S, B, H, N, F]
+        if bool(getattr(model, "use_mean_head", False)):
+            mean_pred = model.predict_mean(
+                x_his=x_his,
+                a_phy=a_phy,
+                a_sem=a_sem,
+                z_sem=z_sem_batch,
+                batch={
+                    "x_his": x_his,
+                    "x_fut": x_fut,
+                    "cutoff_step": cutoff_step,
+                },
             )
-            sample_stack.append(s)
-        ensemble = torch.stack(sample_stack, dim=0)  # [S, B, H, N, F]
+            residual = model.unstandardize_residual(ensemble)
+            residual = model.calibrate_residual_samples(residual, x_his=x_his, z_sem=z_sem_batch)
+            ensemble = residual + mean_pred.unsqueeze(0)
+        if predict_residual and not bool(getattr(model, "uses_absolute_mean_predictor", False)):
+            # ASSUMPTION: residual parameterization predicts deviations from the
+            # last observed normalized value; add it back before inverse scaling.
+            baseline = x_his[:, -1:, :, :].expand(-1, h, -1, -1)
+            ensemble = ensemble + baseline.unsqueeze(0)
 
         pred_mean = ensemble.mean(dim=0)
         pred_inv = _inverse_with_scaler(pred_mean, scaler)
@@ -109,6 +136,13 @@ def evaluate(
         target_eval = _select_metric_feature(target_inv)
         crps = crps_ensemble(ensemble_eval, target_eval)
         crps_list.append(float(crps.item()))
+        prob_metrics = compute_all_metrics(
+            ensemble_eval,
+            target_eval,
+            mape_eps=mape_eps,
+            mape_mask_threshold=mape_mask_threshold,
+        )
+        _append_prob_metrics(prob_metric_lists, prob_metrics)
 
         if eval_horizons:
             h_total = int(target_inv.shape[1])
@@ -121,6 +155,14 @@ def evaluate(
                     target_eval[:, h_idx : h_idx + 1, ...],
                 )
                 crps_by_h.setdefault(int(hh), []).append(float(crps_h.item()))
+                prob_h = compute_all_metrics(
+                    ensemble_eval[:, :, h_idx : h_idx + 1, ...],
+                    target_eval[:, h_idx : h_idx + 1, ...],
+                    mape_eps=mape_eps,
+                    mape_mask_threshold=mape_mask_threshold,
+                )
+                bucket_h = prob_metric_by_h.setdefault(int(hh), {})
+                _append_prob_metrics(bucket_h, prob_h)
 
         if logger is not None and log_interval > 0 and (batch_idx % log_interval == 0):
             logger.info(
@@ -153,6 +195,8 @@ def evaluate(
         mape_mask_threshold=mape_mask_threshold,
     )
     metrics["crps"] = float(np.mean(crps_list)) if crps_list else float("nan")
+    for key, vals in prob_metric_lists.items():
+        metrics[key] = float(np.mean(vals)) if vals else float("nan")
 
     if eval_horizons:
         h_total = int(target_all.shape[1])
@@ -171,4 +215,6 @@ def evaluate(
             metrics[f"mape@{hh}"] = m_h["mape"]
             vals = crps_by_h.get(int(hh), [])
             metrics[f"crps@{hh}"] = float(np.mean(vals)) if vals else float("nan")
+            for key, pvals in prob_metric_by_h.get(int(hh), {}).items():
+                metrics[f"{key}@{hh}"] = float(np.mean(pvals)) if pvals else float("nan")
     return metrics

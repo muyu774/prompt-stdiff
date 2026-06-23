@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -20,7 +21,21 @@ class SentenceTransformerEncoder(SemanticEncoder):
     This module is optional and only required when generating semantic cache.
     """
 
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> None:
+    def __init__(
+        self,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        cache_dir: Path | None = None,
+        local_files_only: bool = False,
+        device: str | None = None,
+    ) -> None:
+        """Initialize a sentence-transformers encoder.
+
+        Args:
+            model_name: HuggingFace model id or local model directory.
+            cache_dir: Optional HuggingFace cache directory.
+            local_files_only: If true, never download from HuggingFace.
+            device: Optional device passed to SentenceTransformer, e.g. "cpu" or "cuda:0".
+        """
         try:
             from sentence_transformers import SentenceTransformer
         except ImportError as exc:
@@ -30,7 +45,36 @@ class SentenceTransformerEncoder(SemanticEncoder):
                 f"original error: {exc}"
             ) from exc
 
-        self.model = SentenceTransformer(model_name)
+        if local_files_only:
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+        kwargs: dict[str, object] = {}
+        if cache_dir is not None:
+            kwargs["cache_folder"] = str(cache_dir)
+        if device is not None and device != "auto":
+            kwargs["device"] = device
+        if local_files_only:
+            kwargs["local_files_only"] = True
+
+        try:
+            self.model = SentenceTransformer(model_name, **kwargs)
+        except TypeError:
+            # ASSUMPTION: some sentence-transformers versions do not expose
+            # local_files_only in the constructor; offline env vars above still
+            # make the HuggingFace stack avoid network access.
+            kwargs.pop("local_files_only", None)
+            self.model = SentenceTransformer(model_name, **kwargs)
+        except OSError as exc:
+            cache_msg = f" with cache_dir={cache_dir}" if cache_dir is not None else ""
+            raise OSError(
+                f"Failed to load semantic encoder '{model_name}'{cache_msg}. "
+                "This usually means the model weights are not fully downloaded or the "
+                "server cannot reach HuggingFace. Retry with a stable network, set "
+                "`HF_ENDPOINT=https://hf-mirror.com` if appropriate, or pre-download "
+                "the model and pass the local directory via `--model_name ... "
+                "--local_files_only`."
+            ) from exc
 
     def encode(
         self,
@@ -63,6 +107,9 @@ def run_offline_encoding(
     prompts_out_file: Path | None = None,
     batch_size: int = 16,
     normalize_embeddings: bool = False,
+    cache_dir: Path | None = None,
+    local_files_only: bool = False,
+    device: str | None = None,
 ) -> None:
     """Generate and save semantic embeddings from node metadata."""
     df = _normalize_columns(pd.read_csv(metadata_csv))
@@ -73,7 +120,12 @@ def run_offline_encoding(
     metas = df.to_dict(orient="records")
     prompts = build_prompts(metas)
 
-    encoder = SentenceTransformerEncoder(model_name=model_name)
+    encoder = SentenceTransformerEncoder(
+        model_name=model_name,
+        cache_dir=cache_dir,
+        local_files_only=local_files_only,
+        device=device,
+    )
     z_sem = encoder.encode(
         prompts,
         batch_size=batch_size,
@@ -109,6 +161,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument(
+        "--cache_dir",
+        type=Path,
+        default=None,
+        help="Optional HuggingFace cache directory for model files.",
+    )
+    parser.add_argument(
+        "--local_files_only",
+        action="store_true",
+        help="Load the encoder only from local files/cache without network access.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help='SentenceTransformer device, e.g. "cpu", "cuda:0", or "auto".',
+    )
+    parser.add_argument(
         "--normalize_embeddings",
         action="store_true",
         help="L2-normalize embeddings before saving.",
@@ -125,4 +194,7 @@ if __name__ == "__main__":
         prompts_out_file=args.prompts_out_file,
         batch_size=args.batch_size,
         normalize_embeddings=args.normalize_embeddings,
+        cache_dir=args.cache_dir,
+        local_files_only=args.local_files_only,
+        device=args.device,
     )

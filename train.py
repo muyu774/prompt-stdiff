@@ -17,10 +17,13 @@ from graph.graph_utils import to_torch
 from graph.physical_graph import load_or_build_physical_graph
 from graph.semantic_graph import load_or_build_semantic_graph
 from models.prompt_stdiff import PromptSTDiff
+from models.mean_predictor import MeanPredictor, get_mean_predictor_config
+from semantic.availability import wrap_dynamic_bank_from_config
 from semantic.dynamic_context import maybe_load_dynamic_semantic_bank
 from semantic.semantic_cache import load_semantic_embeddings
 from trainers.trainer import Trainer
 from utils.config import load_config
+from utils.checkpoint import load_checkpoint
 from utils.device import get_device
 from utils.logger import get_logger
 from utils.seed import set_seed
@@ -85,6 +88,7 @@ def main() -> None:
     data_root = Path(dcfg["data_root"]) / dcfg["name"]
     num_nodes = int(dcfg["num_nodes"])
     dynamic_bank = maybe_load_dynamic_semantic_bank(config, data_root=data_root, logger=logger)
+    dynamic_bank = wrap_dynamic_bank_from_config(dynamic_bank, config=config, data_root=data_root)
 
     a_phy_np = load_or_build_physical_graph(
         file_path=data_root / dcfg["adjacency_file"],
@@ -127,6 +131,10 @@ def main() -> None:
         )
         dynamic_bank = None
 
+    mean_predictor = None
+    if dict(get_mean_predictor_config(config)).get("type"):
+        mean_predictor = MeanPredictor(config=config, device=device).to(device)
+
     model = PromptSTDiff(
         input_dim=int(dcfg["input_dim"]),
         sem_dim=sem_dim_data,
@@ -137,6 +145,42 @@ def main() -> None:
         num_layers=int(mcfg["num_layers"]),
         dropout=float(mcfg["dropout"]),
         semantic_dropout_p=float(mcfg.get("semantic_dropout_p", 0.1)),
+        use_semantic=bool(mcfg.get("use_semantic", True)),
+        use_mean_head=bool(mcfg.get("use_mean_head", False)),
+        mean_head_hidden_dim=(
+            int(mcfg["mean_head_hidden_dim"])
+            if mcfg.get("mean_head_hidden_dim") is not None
+            else None
+        ),
+        mean_predictor=mean_predictor,
+        center_residual_samples=bool(mcfg.get("center_residual_samples", False)),
+        residual_sample_scale=float(mcfg.get("residual_sample_scale", 1.0)),
+        residual_horizon_scale=mcfg.get("residual_horizon_scale", None),
+        residual_node_group_ids=mcfg.get("residual_node_group_ids", None),
+        residual_node_group_scale=mcfg.get("residual_node_group_scale", None),
+        use_hetero_residual_scale=bool(mcfg.get("use_hetero_residual_scale", False)),
+        hetero_scale_hidden_dim=(
+            int(mcfg["hetero_scale_hidden_dim"])
+            if mcfg.get("hetero_scale_hidden_dim") is not None
+            else None
+        ),
+        hetero_scale_min=float(mcfg.get("hetero_scale_min", 0.2)),
+        hetero_scale_max=float(mcfg.get("hetero_scale_max", 6.0)),
+        hetero_scale_use_semantic=(
+            bool(mcfg["hetero_scale_use_semantic"])
+            if mcfg.get("hetero_scale_use_semantic") is not None
+            else None
+        ),
+        use_incident_tail_scale=bool(mcfg.get("use_incident_tail_scale", False)),
+        incident_tail_hidden_dim=(
+            int(mcfg["incident_tail_hidden_dim"])
+            if mcfg.get("incident_tail_hidden_dim") is not None
+            else None
+        ),
+        incident_tail_min_scale=float(mcfg.get("incident_tail_min_scale", 0.85)),
+        incident_tail_max_scale=float(mcfg.get("incident_tail_max_scale", 4.0)),
+        incident_tail_use_semantic=bool(mcfg.get("incident_tail_use_semantic", True)),
+        incident_tail_df=float(mcfg.get("incident_tail_df", 3.0)),
     ).to(device)
 
     betas = build_beta_schedule(diff_cfg)
@@ -160,10 +204,44 @@ def main() -> None:
         process=process,
         noise_prior=noise_prior,
         sampling_steps=int(diff_cfg.get("sampling_steps", diff_cfg["num_steps"])),
+        sampler_type=str(diff_cfg.get("sampler", "ddpm")),
     )
 
+    init_ckpt = config["train"].get("init_checkpoint", None)
+    if init_ckpt:
+        missing, unexpected = model.load_state_dict(
+            torch.load(init_ckpt, map_location=str(device))["model"],
+            strict=bool(config["train"].get("init_checkpoint_strict", False)),
+        )
+        logger.info(
+            "Initialized model from %s (missing=%d unexpected=%d)",
+            init_ckpt,
+            len(missing),
+            len(unexpected),
+        )
+
+    freeze_except = config["train"].get("freeze_except_prefixes", None)
+    if freeze_except:
+        prefixes = tuple(str(x) for x in freeze_except)
+        trainable_names = []
+        frozen_names = []
+        for name, param in model.named_parameters():
+            keep_trainable = name.startswith(prefixes)
+            param.requires_grad = keep_trainable
+            (trainable_names if keep_trainable else frozen_names).append(name)
+        logger.info(
+            "Freeze policy active: trainable_prefixes=%s trainable_params=%d frozen_params=%d",
+            list(prefixes),
+            sum(p.numel() for p in model.parameters() if p.requires_grad),
+            sum(p.numel() for p in model.parameters() if not p.requires_grad),
+        )
+        logger.info("Trainable parameter names: %s", ", ".join(trainable_names))
+
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    if not trainable_params:
+        raise RuntimeError("No trainable parameters remain after freeze policy.")
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        trainable_params,
         lr=float(config["train"]["lr"]),
         weight_decay=float(config["train"]["weight_decay"]),
     )

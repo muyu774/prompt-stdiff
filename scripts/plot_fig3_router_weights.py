@@ -98,6 +98,12 @@ def _load_model_and_data(config: Dict, device: torch.device):
         num_layers=int(mcfg["num_layers"]),
         dropout=float(mcfg["dropout"]),
         semantic_dropout_p=float(mcfg.get("semantic_dropout_p", 0.1)),
+        use_mean_head=bool(mcfg.get("use_mean_head", False)),
+        mean_head_hidden_dim=(
+            int(mcfg["mean_head_hidden_dim"])
+            if mcfg.get("mean_head_hidden_dim") is not None
+            else None
+        ),
     ).to(device)
 
     process = DiffusionProcess(

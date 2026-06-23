@@ -1,0 +1,8 @@
+defaults:
+  - pems08_agcrn_resdiff.yaml
+
+model:
+  use_semantic: false
+
+train:
+  save_dir: ./outputs/checkpoints/pems08_agcrn_resdiff_nosem

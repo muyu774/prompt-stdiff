@@ -1,0 +1,6 @@
+defaults:
+  - pems08_pdformer_resdiff_incident_tail.yaml
+
+train:
+  loss_residual_scale_type: gaussian
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff_incident_tail_gaussian

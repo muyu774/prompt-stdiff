@@ -1,0 +1,9 @@
+defaults:
+  - pems08_pdformer_resdiff_hetero.yaml
+
+model:
+  use_semantic: false
+  hetero_scale_use_semantic: false
+
+train:
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff_hetero_nosem

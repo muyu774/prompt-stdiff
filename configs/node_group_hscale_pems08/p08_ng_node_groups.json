@@ -1,0 +1,27 @@
+{
+  "base_config": "configs/pems08_pdformer_resdiff_hetero_nosem.yaml",
+  "group_counts": [
+    57,
+    57,
+    56
+  ],
+  "hscale": [
+    1.06,
+    1.0655,
+    1.0709,
+    1.0764,
+    1.0818,
+    1.0873,
+    1.0927,
+    1.0982,
+    1.1036,
+    1.1091,
+    1.1145,
+    1.12
+  ],
+  "num_groups": 3,
+  "score_max": 1.3943058252334595,
+  "score_mean": 0.17182427644729614,
+  "score_min": 0.035279083997011185,
+  "split": "val"
+}

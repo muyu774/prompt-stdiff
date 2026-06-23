@@ -14,6 +14,7 @@ Output NPZ contains:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from typing import List, Optional
 
@@ -85,6 +86,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start_time", type=str, required=True, help="Timeline origin, e.g. 2018-01-01 00:00:00")
     parser.add_argument("--freq_minutes", type=int, default=5)
     parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument(
+        "--cache_dir",
+        type=Path,
+        default=None,
+        help="Optional HuggingFace cache directory for model files.",
+    )
+    parser.add_argument(
+        "--local_files_only",
+        action="store_true",
+        help="Load the encoder only from local files/cache without network access.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        help='SentenceTransformer device, e.g. "cpu", "cuda:0", or "auto".',
+    )
     parser.add_argument("--normalize_embeddings", action="store_true")
     return parser.parse_args()
 
@@ -173,7 +191,34 @@ def main() -> None:
         source_id = np.zeros((len(df),), dtype=np.int64)
         source_vocab = np.asarray(["unknown"], dtype="<U64")
 
-    model = SentenceTransformer(args.model_name)
+    if args.local_files_only:
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
+    model_kwargs: dict[str, object] = {}
+    if args.cache_dir is not None:
+        model_kwargs["cache_folder"] = str(args.cache_dir)
+    if args.device != "auto":
+        model_kwargs["device"] = args.device
+    if args.local_files_only:
+        model_kwargs["local_files_only"] = True
+
+    try:
+        model = SentenceTransformer(args.model_name, **model_kwargs)
+    except TypeError:
+        # ASSUMPTION: older sentence-transformers versions may not expose
+        # local_files_only in the constructor; offline env vars above still
+        # prevent network access in the HuggingFace stack.
+        model_kwargs.pop("local_files_only", None)
+        model = SentenceTransformer(args.model_name, **model_kwargs)
+    except OSError as exc:
+        cache_msg = f" with cache_dir={args.cache_dir}" if args.cache_dir is not None else ""
+        raise OSError(
+            f"Failed to load semantic encoder '{args.model_name}'{cache_msg}. "
+            "If the server network is unstable, pass a local model directory via "
+            "`--model_name /path/to/all-roberta-large-v1 --local_files_only`."
+        ) from exc
+
     emb = model.encode(
         texts,
         convert_to_numpy=True,

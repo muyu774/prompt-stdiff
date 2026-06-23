@@ -12,6 +12,9 @@ dataset:
 
 model:
   sem_dim: 1024
+  predict_residual: true
+  # ASSUMPTION: predict residuals over the last observed value to keep diffusion
+  # samples anchored to the strong persistence prior on PeMS03.
   gamma: 0.00
   # ASSUMPTION: training currently uses standard Gaussian forward noise; use gamma=0
   # to avoid reverse-process initialization mismatch and stabilize MAE.
@@ -22,5 +25,6 @@ train:
   # ASSUMPTION: use lower LR for more stable diffusion training on pems03 low-MAE baseline.
 
 diffusion:
-  clip_x0: false
-  # ASSUMPTION: disable x0 clipping for heavy-tailed traffic flow values.
+  clip_x0: true
+  # ASSUMPTION: residual x0 is centered near zero, so clipping normalized x0
+  # improves sampling stability without suppressing absolute traffic peaks.

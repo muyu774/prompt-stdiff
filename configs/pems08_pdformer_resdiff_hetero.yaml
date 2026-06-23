@@ -1,0 +1,14 @@
+defaults:
+  - pems08_pdformer_resdiff.yaml
+
+model:
+  residual_sample_scale: 1.0
+  use_hetero_residual_scale: true
+  hetero_scale_hidden_dim: 128
+  hetero_scale_min: 0.15
+  hetero_scale_max: 8.0
+  hetero_scale_use_semantic: true
+
+train:
+  loss_residual_scale_weight: 0.05
+  save_dir: ./outputs/checkpoints/pems08_pdformer_resdiff_hetero

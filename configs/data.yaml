@@ -37,4 +37,8 @@ dataset:
     fusion_alpha: 0.35
     recency_tau_steps: 288
     strict_truncation: true
+    availability:
+      regime: full
+      incident_lag_minutes: 0
+      weather_forecast_scale: 0.75
     # ASSUMPTION: dynamic semantic context uses 5-min step index and exponential recency weighting.

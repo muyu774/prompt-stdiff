@@ -1,0 +1,149 @@
+[config] wrote /mnt/data/wzy/prompt-stdiff/configs/.tmp_pems04_h12_g0_1935182.yaml
+[2026-06-17 21:55:24,231] INFO - Using device: cuda:0
+[2026-06-17 21:55:34,892] INFO - Epoch 1 Step 50 | loss=0.689887
+[2026-06-17 21:55:43,237] INFO - Epoch 1 Step 100 | loss=0.634875
+[2026-06-17 21:55:51,646] INFO - Epoch 1 Step 150 | loss=0.685277
+[2026-06-17 21:56:00,123] INFO - Epoch 1 Step 200 | loss=0.622756
+[2026-06-17 21:56:09,083] INFO - Epoch 1 Step 250 | loss=0.620631
+[2026-06-17 21:56:17,421] INFO - Epoch 1 Step 300 | loss=0.628048
+[2026-06-17 21:56:20,664] INFO - Epoch 1 | train_loss=0.670027
+[2026-06-17 21:56:20,665] INFO - Epoch 1 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 22:04:33,439] INFO - Validation progress | batch 10/106
+[2026-06-17 22:12:43,038] INFO - Validation progress | batch 20/106
+[2026-06-17 22:12:43,038] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 22:12:43,127] INFO - Epoch 1 | validation finished in 982.46s
+[2026-06-17 22:12:43,127] INFO - Epoch 1 | val_mae=28.935152 val_rmse=43.979164 val_mape=0.210469 val_crps=21.693490
+[2026-06-17 22:12:43,127] INFO - Epoch 1 | horizon=3 | MAE=23.858210 RMSE=36.471035 CRPS=17.688122
+[2026-06-17 22:12:43,127] INFO - Epoch 1 | horizon=6 | MAE=27.900295 RMSE=42.265442 CRPS=20.763343
+[2026-06-17 22:12:43,127] INFO - Epoch 1 | horizon=12 | MAE=37.400818 RMSE=54.619812 CRPS=28.545591
+[2026-06-17 22:12:52,726] INFO - Epoch 2 Step 50 | loss=0.662556
+[2026-06-17 22:13:01,903] INFO - Epoch 2 Step 100 | loss=0.642878
+[2026-06-17 22:13:11,236] INFO - Epoch 2 Step 150 | loss=0.573489
+[2026-06-17 22:13:20,659] INFO - Epoch 2 Step 200 | loss=0.594307
+[2026-06-17 22:13:30,172] INFO - Epoch 2 Step 250 | loss=0.627748
+[2026-06-17 22:13:39,547] INFO - Epoch 2 Step 300 | loss=0.676645
+[2026-06-17 22:13:42,727] INFO - Epoch 2 | train_loss=0.597289
+[2026-06-17 22:13:42,727] INFO - Epoch 2 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 22:20:34,762] INFO - Validation progress | batch 10/106
+[2026-06-17 22:27:56,503] INFO - Validation progress | batch 20/106
+[2026-06-17 22:27:56,503] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 22:27:56,567] INFO - Epoch 2 | validation finished in 853.84s
+[2026-06-17 22:27:56,567] INFO - Epoch 2 | val_mae=27.892752 val_rmse=42.489655 val_mape=0.198430 val_crps=20.654023
+[2026-06-17 22:27:56,567] INFO - Epoch 2 | horizon=3 | MAE=23.553932 RMSE=36.007263 CRPS=17.338345
+[2026-06-17 22:27:56,567] INFO - Epoch 2 | horizon=6 | MAE=27.175362 RMSE=41.149513 CRPS=20.011083
+[2026-06-17 22:27:56,567] INFO - Epoch 2 | horizon=12 | MAE=34.984562 RMSE=51.874924 CRPS=26.222875
+[2026-06-17 22:28:05,332] INFO - Epoch 3 Step 50 | loss=0.490916
+[2026-06-17 22:28:13,474] INFO - Epoch 3 Step 100 | loss=0.548705
+[2026-06-17 22:28:21,707] INFO - Epoch 3 Step 150 | loss=0.475933
+[2026-06-17 22:28:29,888] INFO - Epoch 3 Step 200 | loss=0.512754
+[2026-06-17 22:28:37,947] INFO - Epoch 3 Step 250 | loss=0.466530
+[2026-06-17 22:28:46,296] INFO - Epoch 3 Step 300 | loss=0.602076
+[2026-06-17 22:28:49,129] INFO - Epoch 3 | train_loss=0.574293
+[2026-06-17 22:28:49,129] INFO - Epoch 3 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 22:35:41,392] INFO - Validation progress | batch 10/106
+[2026-06-17 22:41:48,941] INFO - Validation progress | batch 20/106
+[2026-06-17 22:41:48,942] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 22:41:49,082] INFO - Epoch 3 | validation finished in 779.95s
+[2026-06-17 22:41:49,082] INFO - Epoch 3 | val_mae=29.921083 val_rmse=44.439011 val_mape=0.205202 val_crps=22.050005
+[2026-06-17 22:41:49,082] INFO - Epoch 3 | horizon=3 | MAE=27.135542 RMSE=39.517929 CRPS=19.787893
+[2026-06-17 22:41:49,082] INFO - Epoch 3 | horizon=6 | MAE=28.984451 RMSE=43.162128 CRPS=21.322358
+[2026-06-17 22:41:49,082] INFO - Epoch 3 | horizon=12 | MAE=34.691784 RMSE=51.804291 CRPS=25.960214
+[2026-06-17 22:41:57,015] INFO - Epoch 4 Step 50 | loss=0.613372
+[2026-06-17 22:42:04,166] INFO - Epoch 4 Step 100 | loss=0.554195
+[2026-06-17 22:42:11,423] INFO - Epoch 4 Step 150 | loss=0.578438
+[2026-06-17 22:42:18,505] INFO - Epoch 4 Step 200 | loss=0.549250
+[2026-06-17 22:42:25,616] INFO - Epoch 4 Step 250 | loss=0.589034
+[2026-06-17 22:42:32,875] INFO - Epoch 4 Step 300 | loss=0.625047
+[2026-06-17 22:42:35,447] INFO - Epoch 4 | train_loss=0.566150
+[2026-06-17 22:42:35,448] INFO - Epoch 4 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 22:48:37,569] INFO - Validation progress | batch 10/106
+[2026-06-17 22:54:13,460] INFO - Validation progress | batch 20/106
+[2026-06-17 22:54:13,460] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 22:54:13,515] INFO - Epoch 4 | validation finished in 698.07s
+[2026-06-17 22:54:13,515] INFO - Epoch 4 | val_mae=27.023193 val_rmse=41.394836 val_mape=0.178499 val_crps=19.880787
+[2026-06-17 22:54:13,515] INFO - Epoch 4 | horizon=3 | MAE=23.489225 RMSE=36.046505 CRPS=17.146344
+[2026-06-17 22:54:13,515] INFO - Epoch 4 | horizon=6 | MAE=26.712061 RMSE=40.621246 CRPS=19.540211
+[2026-06-17 22:54:13,515] INFO - Epoch 4 | horizon=12 | MAE=32.879597 RMSE=49.246487 CRPS=24.494522
+[2026-06-17 22:54:22,279] INFO - Epoch 5 Step 50 | loss=0.580741
+[2026-06-17 22:54:29,450] INFO - Epoch 5 Step 100 | loss=0.603088
+[2026-06-17 22:54:36,574] INFO - Epoch 5 Step 150 | loss=0.644479
+[2026-06-17 22:54:43,795] INFO - Epoch 5 Step 200 | loss=0.548153
+[2026-06-17 22:54:51,069] INFO - Epoch 5 Step 250 | loss=0.626686
+[2026-06-17 22:54:58,404] INFO - Epoch 5 Step 300 | loss=0.594902
+[2026-06-17 22:55:00,944] INFO - Epoch 5 | train_loss=0.556983
+[2026-06-17 22:55:00,944] INFO - Epoch 5 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 23:01:11,684] INFO - Validation progress | batch 10/106
+[2026-06-17 23:06:55,426] INFO - Validation progress | batch 20/106
+[2026-06-17 23:06:55,427] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 23:06:55,513] INFO - Epoch 5 | validation finished in 714.57s
+[2026-06-17 23:06:55,525] INFO - Epoch 5 | val_mae=27.125235 val_rmse=40.961342 val_mape=0.202895 val_crps=19.935487
+[2026-06-17 23:06:55,525] INFO - Epoch 5 | horizon=3 | MAE=23.418709 RMSE=35.671177 CRPS=17.032103
+[2026-06-17 23:06:55,525] INFO - Epoch 5 | horizon=6 | MAE=26.683479 RMSE=40.173557 CRPS=19.481851
+[2026-06-17 23:06:55,525] INFO - Epoch 5 | horizon=12 | MAE=32.847038 RMSE=48.260128 CRPS=24.568892
+[2026-06-17 23:07:03,553] INFO - Epoch 6 Step 50 | loss=0.575603
+[2026-06-17 23:07:10,734] INFO - Epoch 6 Step 100 | loss=0.549061
+[2026-06-17 23:07:17,783] INFO - Epoch 6 Step 150 | loss=0.620511
+[2026-06-17 23:07:24,723] INFO - Epoch 6 Step 200 | loss=0.678590
+[2026-06-17 23:07:30,966] INFO - Epoch 6 Step 250 | loss=0.638939
+[2026-06-17 23:07:37,336] INFO - Epoch 6 Step 300 | loss=0.570723
+[2026-06-17 23:07:39,563] INFO - Epoch 6 | train_loss=0.555019
+[2026-06-17 23:07:39,563] INFO - Epoch 6 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 23:13:27,143] INFO - Validation progress | batch 10/106
+[2026-06-17 23:19:42,826] INFO - Validation progress | batch 20/106
+[2026-06-17 23:19:42,826] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 23:19:42,871] INFO - Epoch 6 | validation finished in 723.31s
+[2026-06-17 23:19:42,871] INFO - Epoch 6 | val_mae=26.501875 val_rmse=41.025440 val_mape=0.164949 val_crps=19.606440
+[2026-06-17 23:19:42,871] INFO - Epoch 6 | horizon=3 | MAE=22.902718 RMSE=35.529606 CRPS=16.858101
+[2026-06-17 23:19:42,871] INFO - Epoch 6 | horizon=6 | MAE=25.988794 RMSE=40.184204 CRPS=19.145692
+[2026-06-17 23:19:42,871] INFO - Epoch 6 | horizon=12 | MAE=32.291016 RMSE=48.736340 CRPS=24.112547
+[2026-06-17 23:19:50,618] INFO - Epoch 7 Step 50 | loss=0.565176
+[2026-06-17 23:19:58,042] INFO - Epoch 7 Step 100 | loss=0.501428
+[2026-06-17 23:20:05,127] INFO - Epoch 7 Step 150 | loss=0.599012
+[2026-06-17 23:20:11,771] INFO - Epoch 7 Step 200 | loss=0.467320
+[2026-06-17 23:20:16,667] INFO - Epoch 7 Step 250 | loss=0.534745
+[2026-06-17 23:20:21,512] INFO - Epoch 7 Step 300 | loss=0.523421
+[2026-06-17 23:20:23,124] INFO - Epoch 7 | train_loss=0.548876
+[2026-06-17 23:20:23,124] INFO - Epoch 7 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 23:26:02,002] INFO - Validation progress | batch 10/106
+[2026-06-17 23:31:58,741] INFO - Validation progress | batch 20/106
+[2026-06-17 23:31:58,741] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 23:31:58,870] INFO - Epoch 7 | validation finished in 695.75s
+[2026-06-17 23:31:58,870] INFO - Epoch 7 | val_mae=27.033251 val_rmse=41.646915 val_mape=0.167521 val_crps=19.892718
+[2026-06-17 23:31:58,871] INFO - Epoch 7 | horizon=3 | MAE=23.167513 RMSE=35.917984 CRPS=17.046560
+[2026-06-17 23:31:58,871] INFO - Epoch 7 | horizon=6 | MAE=26.592142 RMSE=40.852654 CRPS=19.475971
+[2026-06-17 23:31:58,871] INFO - Epoch 7 | horizon=12 | MAE=33.445293 RMSE=49.913357 CRPS=24.734010
+[2026-06-17 23:32:06,128] INFO - Epoch 8 Step 50 | loss=0.477952
+[2026-06-17 23:32:12,466] INFO - Epoch 8 Step 100 | loss=0.494913
+[2026-06-17 23:32:18,793] INFO - Epoch 8 Step 150 | loss=0.572866
+[2026-06-17 23:32:25,133] INFO - Epoch 8 Step 200 | loss=0.493913
+[2026-06-17 23:32:31,505] INFO - Epoch 8 Step 250 | loss=0.625408
+[2026-06-17 23:32:37,854] INFO - Epoch 8 Step 300 | loss=0.604793
+[2026-06-17 23:32:40,057] INFO - Epoch 8 | train_loss=0.545754
+[2026-06-17 23:32:40,057] INFO - Epoch 8 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 23:38:43,082] INFO - Validation progress | batch 10/106
+[2026-06-17 23:44:25,636] INFO - Validation progress | batch 20/106
+[2026-06-17 23:44:25,637] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 23:44:25,718] INFO - Epoch 8 | validation finished in 705.66s
+[2026-06-17 23:44:25,719] INFO - Epoch 8 | val_mae=27.941446 val_rmse=42.702744 val_mape=0.178625 val_crps=20.524505
+[2026-06-17 23:44:25,719] INFO - Epoch 8 | horizon=3 | MAE=24.039087 RMSE=37.023338 CRPS=17.470472
+[2026-06-17 23:44:25,719] INFO - Epoch 8 | horizon=6 | MAE=27.157080 RMSE=41.650852 CRPS=19.825149
+[2026-06-17 23:44:25,719] INFO - Epoch 8 | horizon=12 | MAE=35.017193 RMSE=51.406433 CRPS=26.175309
+[2026-06-17 23:44:33,300] INFO - Epoch 9 Step 50 | loss=0.616421
+[2026-06-17 23:44:40,312] INFO - Epoch 9 Step 100 | loss=0.527947
+[2026-06-17 23:44:47,390] INFO - Epoch 9 Step 150 | loss=0.616724
+[2026-06-17 23:44:54,656] INFO - Epoch 9 Step 200 | loss=0.504664
+[2026-06-17 23:45:01,974] INFO - Epoch 9 Step 250 | loss=0.540450
+[2026-06-17 23:45:08,998] INFO - Epoch 9 Step 300 | loss=0.579862
+[2026-06-17 23:45:11,486] INFO - Epoch 9 | train_loss=0.537971
+[2026-06-17 23:45:11,486] INFO - Epoch 9 | start validation (val_batches=106, nsample=20, diffusion_steps=50, max_batches=20)
+[2026-06-17 23:51:21,125] INFO - Validation progress | batch 10/106
+[2026-06-17 23:56:54,088] INFO - Validation progress | batch 20/106
+[2026-06-17 23:56:54,088] INFO - Validation early stop at max_batches=20 (processed 20/106 batches)
+[2026-06-17 23:56:54,154] INFO - Epoch 9 | validation finished in 702.67s
+[2026-06-17 23:56:54,154] INFO - Epoch 9 | val_mae=26.143066 val_rmse=40.274185 val_mape=0.168132 val_crps=19.231493
+[2026-06-17 23:56:54,154] INFO - Epoch 9 | horizon=3 | MAE=22.958040 RMSE=35.501228 CRPS=16.834946
+[2026-06-17 23:56:54,154] INFO - Epoch 9 | horizon=6 | MAE=25.713032 RMSE=39.638783 CRPS=18.837470
+[2026-06-17 23:56:54,154] INFO - Epoch 9 | horizon=12 | MAE=31.341404 RMSE=47.184036 CRPS=23.228028
+[2026-06-17 23:57:02,380] INFO - Epoch 10 Step 50 | loss=0.524311
+[2026-06-17 23:57:09,395] INFO - Epoch 10 Step 100 | loss=0.521252
+[2026-06-17 23:57:16,532] INFO - Epoch 10 Step 150 | loss=0.600853

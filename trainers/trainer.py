@@ -7,11 +7,17 @@ from typing import Dict, Optional
 import time
 
 import torch
+import torch.nn.functional as F
 
 from diffusion.noise_prior import SemanticGuidedDynamicNoisePrior
 from diffusion.process import DiffusionProcess
 from diffusion.sampler import DiffusionSampler
 from models.prompt_stdiff import PromptSTDiff
+from models.mean_predictor import (
+    compute_or_load_residual_standardizer,
+    get_mean_predictor_config,
+    residual_stats_path_from_config,
+)
 from semantic.dynamic_context import DynamicSemanticBank
 from trainers.evaluator import evaluate
 from trainers.losses import build_loss_dict, diffusion_loss_with_x0
@@ -84,6 +90,29 @@ class Trainer:
         self.loss_eps_weight = float(tcfg.get("loss_eps_weight", 1.0))
         self.loss_x0_weight = float(tcfg.get("loss_x0_weight", 0.0))
         self.loss_x0_type = str(tcfg.get("loss_x0_type", "l1"))
+        self.loss_residual_scale_weight = float(tcfg.get("loss_residual_scale_weight", 0.0))
+        self.loss_residual_scale_type = str(tcfg.get("loss_residual_scale_type", "gaussian"))
+        self.predict_residual = bool(config.get("model", {}).get("predict_residual", False))
+        self.use_absolute_mean_predictor = bool(getattr(self.model, "uses_absolute_mean_predictor", False))
+        self.use_mean_head = (
+            bool(config.get("model", {}).get("use_mean_head", False))
+            or self.use_absolute_mean_predictor
+        )
+        self.mean_loss_weight = float(tcfg.get("loss_mean_weight", 1.0 if self.use_mean_head else 0.0))
+        self.mean_loss_type = str(tcfg.get("loss_mean_type", "huber"))
+        self.mean_head_detach = bool(config.get("model", {}).get("mean_head_detach_for_diffusion", True))
+        mean_cfg = dict(get_mean_predictor_config(config))
+        self.residual_standardize = bool(mean_cfg.get("residual_standardize", self.use_absolute_mean_predictor))
+        if self.use_absolute_mean_predictor and self.residual_standardize and self.model.residual_standardizer is None:
+            standardizer = compute_or_load_residual_standardizer(
+                path=residual_stats_path_from_config(config),
+                mean_predictor=self.model.mean_predictor,
+                train_loader=self.train_loader,
+                device=self.device,
+                force_recompute=bool(mean_cfg.get("residual_stats_recompute", False)),
+                logger=self.logger,
+            )
+            self.model.set_residual_standardizer(standardizer)
 
         self.save_dir = Path(tcfg["save_dir"])
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +163,7 @@ class Trainer:
                     metric_feature_index=self.metric_feature_index,
                     mape_eps=self.mape_eps,
                     mape_mask_threshold=self.mape_mask_threshold,
+                    predict_residual=self.predict_residual,
                 )
                 self.logger.info("Epoch %d | validation finished in %.2fs", epoch, time.time() - t0)
                 self.logger.info(
@@ -198,6 +228,7 @@ class Trainer:
                     metric_feature_index=self.metric_feature_index,
                     mape_eps=self.mape_eps,
                     mape_mask_threshold=self.mape_mask_threshold,
+                    predict_residual=self.predict_residual,
                 )
                 self.logger.info("Epoch %d | FULL validation finished in %.2fs", epoch, time.time() - t1)
                 self.logger.info(
@@ -285,7 +316,32 @@ class Trainer:
             )
 
             noise = torch.randn((b, h, n, f), device=self.device, dtype=x_fut.dtype)
-            x_t = self.process.q_sample(x_start=x_fut, t=t, noise=noise)
+            if self.use_absolute_mean_predictor:
+                x0_true = x_fut
+            elif self.predict_residual:
+                # ASSUMPTION: traffic forecasting has a strong persistence prior;
+                # diffusing residuals around the last observation stabilizes point MAE.
+                x0_true = x_fut - x_his[:, -1:, :, :].expand(-1, h, -1, -1)
+            else:
+                x0_true = x_fut
+            mean_pred = None
+            if self.use_mean_head:
+                mean_pred = self.model.predict_mean(
+                    x_his=x_his,
+                    a_phy=self.a_phy,
+                    a_sem=self.a_sem,
+                    z_sem=z_sem_batch,
+                    batch={
+                        "x_his": x_his,
+                        "x_fut": x_fut,
+                        "cutoff_step": cutoff_step,
+                    },
+                )
+                mean_for_diff = mean_pred.detach() if self.mean_head_detach else mean_pred
+                x0_diff_true = self.model.standardize_residual(x0_true - mean_for_diff)
+            else:
+                x0_diff_true = x0_true
+            x_t = self.process.q_sample(x_start=x0_diff_true, t=t, noise=noise)
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -303,11 +359,37 @@ class Trainer:
                     eps_pred=eps_pred,
                     eps_true=noise,
                     x0_pred=x0_pred,
-                    x0_true=x_fut,
+                    x0_true=x0_diff_true,
                     eps_weight=self.loss_eps_weight,
                     x0_weight=self.loss_x0_weight,
                     x0_loss_type=self.loss_x0_type,
                 )
+                if (
+                    self.loss_residual_scale_weight > 0.0
+                    and bool(getattr(self.model, "use_hetero_residual_scale", False))
+                    and self.use_mean_head
+                ):
+                    scale_loss = self.model.residual_scale_nll_loss(
+                        residual_std_target=x0_diff_true,
+                        x_his=x_his,
+                        z_sem=z_sem_batch,
+                        loss_type=self.loss_residual_scale_type,
+                    )
+                    loss = loss + self.loss_residual_scale_weight * scale_loss
+                if (
+                    mean_pred is not None
+                    and self.mean_loss_weight > 0.0
+                    and not self.use_absolute_mean_predictor
+                ):
+                    if self.mean_loss_type == "l1":
+                        mean_loss = F.l1_loss(mean_pred, x0_true)
+                    elif self.mean_loss_type == "mse":
+                        mean_loss = F.mse_loss(mean_pred, x0_true)
+                    elif self.mean_loss_type == "huber":
+                        mean_loss = F.smooth_l1_loss(mean_pred, x0_true)
+                    else:
+                        raise ValueError(f"Unsupported mean_loss_type: {self.mean_loss_type}")
+                    loss = loss + self.mean_loss_weight * mean_loss
 
             if self.amp_scaler.is_enabled():
                 self.amp_scaler.scale(loss).backward()

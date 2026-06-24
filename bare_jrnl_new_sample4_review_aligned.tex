@@ -1,0 +1,621 @@
+\documentclass[lettersize,journal]{IEEEtran}
+
+% Core math and IEEE-compatible utilities
+\usepackage{amsmath,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{array}
+\usepackage[caption=false,font=normalsize,labelfont=sf,textfont=sf]{subfig}
+\usepackage{textcomp}
+\usepackage{stfloats}
+\usepackage{url}
+\usepackage{verbatim}
+\usepackage{graphicx}
+\usepackage{cite}
+
+% Packages required by the migrated ACM sample content
+\usepackage{multirow}
+\usepackage{colortbl}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+
+% -----------------------------------------------------------------------------
+% Migrated from sample-sigconf-authordraft(1).tex into IEEEtran bare journal format.
+% ACM-specific metadata, CCSXML, and acmart author/affiliation commands were removed.
+% -----------------------------------------------------------------------------
+
+
+% Revision note (2026-06-23): This draft is rewritten according to the
+% pre-submission T-ITS diagnostic review. It intentionally removes the old
+% semantic-SOTA framing, test-sweep headline numbers, and scale-inconsistent
+% CRPS claims. Remaining numeric tables are diagnostic and must be regenerated
+% after backbone repair, validation-selected calibration, D3U comparison, and
+% bootstrap significance tests.
+
+\begin{document}
+
+\title{Diagnosing Incident-Regime Failures in Mean-Preserving Residual Probabilistic Traffic Forecasting}
+
+\author{Ziyu~Wang, Kaijie~Xu, and Lin~Qiu%
+\thanks{Ziyu Wang, Kaijie Xu, and Lin Qiu are with Zhejiang University, Hangzhou, Zhejiang, China.}%
+\thanks{E-mail: yan.24@intl.zju.edu.cn; Kaijie.23@intl.zju.edu.cn; linqiu@intl.zju.edu.cn.}%
+\thanks{The authors contributed equally to this work.}}
+
+% The paper headers. Update the journal/volume fields before submission.
+\markboth{Journal Manuscript Draft}%
+{Wang \MakeLowercase{\textit{et al.}}: Incident-Regime Failures in Probabilistic Traffic Forecasting}
+
+\maketitle
+
+\begin{abstract}
+Probabilistic traffic forecasting is often evaluated by aggregate metrics
+such as the continuous ranked probability score (CRPS), yet such averages can
+hide safety-critical failures under incident-driven regime shifts. This paper
+studies this issue through the lens of mean-preserving residual probabilistic
+forecasting: a deterministic traffic backbone supplies a frozen point forecast,
+and a probabilistic residual layer models uncertainty around that mean. Because
+closely related residual-diffusion and residual-regression paradigms have
+recently appeared in CARD, RDIT, D3U/TMDM-style models, and FALDA/DMRR, we do
+not claim mean-preserving residual diffusion as a generic methodological
+novelty. Instead, we use it as a controlled experimental scaffold for traffic
+systems: all residual models share the same frozen backbone, the same scaler,
+and the same splits, allowing us to separate point-forecast quality from
+uncertainty calibration. A validation-honest gate with paired bootstrap tests shows that residual
+diffusion never passes the diffusion-versus-Gaussian gate across sampling and
+training replicates: it improves coverage relative to the best Gaussian arm but
+does not retain a CRPS advantage, and the two independent training-seed
+replicates have strictly positive CRPS-difference intervals. The resulting
+system therefore pivots to gate-selected closed-form residual calibration and
+treats diffusion as an expensive rejected candidate. We further show that
+aggregate CRPS can mask severe conditional under-coverage on drop subsets,
+motivating an incident-regime evaluation protocol with validation-selected
+calibration, per-horizon reliability analysis, paired bootstrap statistics, and
+a mean-vs-dispersion root-cause decomposition.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Probabilistic traffic forecasting, residual calibration, uncertainty calibration, incident analysis, intelligent transportation systems.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Reliable traffic forecasts are central to intelligent transportation systems
+(ITS), where operators must reason not only about the most likely future
+traffic state, but also about uncertainty under disruptions such as crashes,
+weather anomalies, and demand surges. Modern graph neural networks and
+Transformer-based forecasters have substantially improved deterministic
+traffic prediction by modeling road-network topology and temporal dynamics.
+At the same time, diffusion-based and other probabilistic models have made it
+possible to report predictive distributions rather than only point forecasts.
+
+Despite these advances, a practical gap remains between aggregate benchmark
+performance and deployment-facing reliability. In many traffic studies,
+probabilistic performance is summarized by aggregate metrics such as the
+continuous ranked probability score (CRPS). Such aggregate scores are useful,
+but they can conceal safety-critical failure modes: a model may achieve a
+competitive average CRPS while assigning near-zero coverage to rare but
+operationally important incident-driven drops. For traffic management, this
+conditional failure is often more consequential than a small aggregate CRPS
+improvement.
+
+This paper therefore revisits probabilistic traffic forecasting from a
+failure-mode and calibration perspective. We study a modular
+mean-preserving residual forecasting paradigm. A deterministic backbone such
+as PDFormer or AGCRN produces a frozen point forecast, and a residual
+probabilistic layer models uncertainty around that forecast. During inference,
+residual samples are centered so that the predictive ensemble mean matches
+the deterministic backbone. This design intentionally preserves point
+accuracy and isolates the probabilistic model's role: it should calibrate
+uncertainty, not silently improve or degrade the mean forecast.
+
+This formulation is related to recent decoupled deterministic--stochastic
+forecasting methods such as TMDM, D3U, RDIT, and FALDA. We therefore do not
+claim mean preservation or residual diffusion alone as a new generic
+time-series mechanism. Instead, our focus is ITS-specific: we instantiate and
+stress-test this paradigm on graph traffic forecasting, compare diffusion
+residuals against simpler heteroscedastic Gaussian residuals, and evaluate
+whether aggregate calibration transfers to incident/drop regimes. This
+positioning is important because a simpler Gaussian residual layer may be
+preferable if diffusion does not provide a measurable advantage where it
+matters.
+
+The current experiments lead to three working findings. First,
+mean-preserving residual models preserve the frozen backbone's point MAE/RMSE
+by construction, so probabilistic comparisons can be made without silently
+changing the deterministic forecast. Second, under a validation-honest gate
+with paired bootstrap testing, the diffusion residual generator fails all five
+sampling/training replicates: it improves recalibrated coverage but never
+retains a CRPS advantage over closed-form Gaussian-B, with the two independent
+training-seed intervals strictly positive; the deployable method therefore
+pivots to Gaussian-B. Third,
+incident/drop subsets reveal a severe
+conditional-coverage failure that is largely hidden by aggregate metrics. This
+motivates validation-selected calibration, multi-seed paired statistics, and
+conformal calibration as necessary components of a trustworthy traffic
+uncertainty evaluation.
+
+The contributions of this paper are:
+\begin{itemize}
+    \item We provide a controlled, same-backbone evaluation protocol for
+    mean-preserving residual probabilistic traffic forecasting, comparing
+    residual diffusion, heteroscedastic Gaussian residuals, conformal residual
+    calibration, and residual-regression baselines under identical frozen
+    point forecasts.
+    \item We introduce a validation-only generator-selection gate. In the
+    current evidence, this gate rejects residual diffusion across sampling and
+    training replicates and selects closed-form Gaussian-B calibration as the
+    deployable residual generator.
+    \item We introduce an incident/drop regime evaluation with bootstrap
+    confidence intervals and per-horizon reliability metrics, showing why
+    aggregate CRPS alone is insufficient for deployment-facing ITS uncertainty.
+    \item We propose a mean-vs-dispersion root-cause decomposition that
+    distinguishes failures caused by unpredictable mean shifts from failures
+    caused by overly narrow predictive intervals. This decomposition clarifies
+    when variance calibration can help and when it cannot.
+    \item We report semantic/event conditioning as an optional diagnostic
+    factor rather than a headline contribution, retaining it only if it improves
+    incident-regime reliability beyond non-semantic volatility or change-point
+    indicators.
+\end{itemize}
+
+% \section{Related Work}
+
+\subsection{Deterministic Spatio-Temporal Traffic Forecasting}
+Traffic forecasting has evolved from statistical models toward deep
+spatio-temporal learning over urban sensor networks. Graph-based models such
+as STGCN, DCRNN, GWNet, and AGCRN encode road-network dependencies, while
+attention and Transformer-based architectures such as GMAN, PDFormer, and
+STAEformer further improve long-range temporal and spatial modeling. These
+models are often strong deterministic point forecasters. In this work they
+serve as frozen mean predictors. A key requirement for our protocol is that
+these backbones must be reproduced at literature-level accuracy; otherwise,
+the residual distribution and all downstream probabilistic comparisons are
+confounded by a weak mean.
+
+\subsection{Residual Probabilistic Forecasting and Diffusion}
+Probabilistic forecasting extends point prediction to predictive
+distributions. CSDI and TimeGrad are representative diffusion-based models
+for multivariate time series, and DiffSTG and SpecSTG adapt diffusion or
+spectral generative modeling to traffic graphs. A closely related generic
+line of work, including CARD, TMDM, D3U, RDIT, and FALDA/DMRR, decouples a
+strong deterministic point estimator from residual or stochastic uncertainty
+modeling. These works establish that adding uncertainty modeling to a point
+forecaster often preserves the point estimate, and that calibrated residual
+Gaussian or diffusion models can substantially improve probabilistic scores.
+This prior art overlaps strongly with any generic claim of ``mean-preserving
+residual diffusion.'' Therefore, our paper treats this paradigm as an
+experimental scaffold rather than as a new generic method. The remaining
+traffic-specific question is different: whether such residual probabilistic
+models, including RDIT-style scale calibration and conformal residual
+calibration, are reliable under graph-structured incident/drop regimes.
+
+\subsection{Calibration, Conformal Prediction, and Incident Reliability}
+For deployment, a predictive interval is useful only if its empirical
+coverage matches the nominal risk level while remaining sufficiently sharp.
+Metrics such as CRPS, prediction interval coverage probability (PICP), mean
+prediction interval width (MPIW), Winkler score, and reliability diagrams
+measure different aspects of this trade-off. Conformal prediction provides a
+post-hoc route to marginal coverage guarantees and is especially relevant
+when probabilistic models are overconfident. However, marginal calibration
+alone may still fail conditionally on rare regimes such as incident-driven
+traffic drops. We therefore evaluate both aggregate calibration and
+incident/drop-subset reliability.
+
+\subsection{External Semantics for Traffic Forecasting}
+Language models and semantic urban data can encode weather, incidents,
+calendar events, and regional context. Earlier versions of this work treated
+semantic prompting as the central mechanism. Our current evidence does not
+support a universal semantic-improvement claim: no-semantic variants are
+competitive or stronger on aggregate metrics, and naive semantic tail modules
+can degrade calibration. We therefore restrict semantics to an optional
+conditioning source in incident analysis and distinguish positive findings
+from negative ones.
+
+\section{Method}
+
+\subsection{Problem Formulation}
+Let $X_{t-L+1:t}\in\mathbb{R}^{L\times N\times F}$ denote the historical
+traffic observations over $N$ sensors and $F$ input features. The goal is to
+predict the future sequence $Y_{t+1:t+H}\in\mathbb{R}^{H\times N\times 1}$
+and its predictive distribution. We evaluate both point metrics
+(MAE/RMSE/MAPE) and probabilistic metrics (CRPS, NLL, PICP, MPIW, and
+Winkler score) after inverse transformation to the physical traffic scale.
+
+\subsection{Frozen Mean Predictor}
+A deterministic spatio-temporal backbone $f_\phi$ produces a point forecast
+\begin{equation}
+    \hat{\mu} = f_\phi(X_{t-L+1:t}),
+\end{equation}
+where $\phi$ is frozen throughout residual training. The backbone may be
+AGCRN, PDFormer, or another validated deterministic forecaster. In the final
+protocol, the frozen backbone must be evaluated through the same data split,
+scaler, and metric implementation used by the residual model. This prevents
+``impossible'' improvements in point MAE from evaluation mismatch.
+
+\subsection{Standardized Residual Target}
+The residual is defined in the normalized forecasting space:
+\begin{equation}
+    R = Y - \hat{\mu}.
+\end{equation}
+We estimate per-horizon residual statistics on the training set only,
+\begin{equation}
+    \tilde{R}_{h} = \frac{R_h - m_h}{s_h + \varepsilon},
+\end{equation}
+where $m_h$ and $s_h$ are cached and reused for validation/test inference.
+This standardization keeps the residual target compatible with the diffusion
+noise schedule and avoids test leakage.
+
+\subsection{Residual Diffusion}
+The diffusion model is trained on the standardized residual $\tilde{R}$. At
+inference, it produces residual samples
+$\{\tilde{R}^{(j)}\}_{j=1}^{S}$. After inverse residual standardization, we
+center the residual samples along the ensemble dimension:
+\begin{equation}
+    R^{(j)} \leftarrow R^{(j)} - \frac{1}{S}\sum_{q=1}^{S} R^{(q)}.
+\end{equation}
+The final predictive ensemble is
+\begin{equation}
+    \hat{Y}^{(j)} = \hat{\mu} + R^{(j)}.
+\end{equation}
+Therefore, the ensemble mean equals the frozen deterministic forecast by
+construction. This is a deliberate design choice: point accuracy is inherited
+from the backbone, and the residual layer is judged by uncertainty quality.
+
+\subsection{Heteroscedastic Residual Scale}
+We further use a residual scale factor $a_{h,n}$, parameterized by horizon,
+node, or node groups, to control predictive spread:
+\begin{equation}
+    R^{(j)} \leftarrow a_{h,n} R^{(j)}.
+\end{equation}
+The scale is selected on validation data unless explicitly stated. Test-set
+sweeps are reported only as diagnostic curves, not as headline results.
+
+\subsection{Gaussian and Global-Widening Baselines}
+To test whether diffusion is necessary, we compare against a
+heteroscedastic Gaussian residual model using the same frozen mean and
+residual scale. We also evaluate globally widened intervals. These controls
+answer two reviewer-critical questions: whether diffusion improves beyond a
+simple parametric residual, and whether coverage gains are merely the result
+of wider intervals.
+
+\subsection{Incident-Conditioned Tail Calibration}
+We optionally attach a tail-scale head $g_\psi$ that amplifies residual
+variance under event conditions:
+\begin{equation}
+    a^{\mathrm{tail}}_{h,n}=1+\mathrm{softplus}(g_\psi(c_{t,n,h})),
+\end{equation}
+where $c_{t,n,h}$ may be a non-semantic volatility/change-point signal or a
+semantic event embedding. The main residual model is frozen when training
+this head. This module is treated as a hypothesis under test, not as an
+assumed contribution: if it fails to improve incident/drop coverage without
+unacceptable aggregate degradation, it is reported as a negative finding.
+
+\subsection{Mean-vs-Dispersion Root-Cause Decomposition}
+For an event subset, interval failure can arise from two different mechanisms:
+(1) the frozen mean misses an abrupt regime shift, or (2) the predictive
+spread is too narrow around an otherwise reasonable mean. To separate these
+mechanisms, let $[L_{h,n}, U_{h,n}]$ denote a central prediction interval,
+$c_{h,n}=(L_{h,n}+U_{h,n})/2$ its center, and
+$w_{h,n}=(U_{h,n}-L_{h,n})/2$ its half-width. For each target
+$Y_{h,n}$, we compute
+\begin{equation}
+    \rho_{h,n}=\frac{|Y_{h,n}-\hat{\mu}_{h,n}|}{w_{h,n}+\varepsilon}.
+\end{equation}
+Large $\rho$ indicates that the target lies far outside the interval because
+of a mean-level surprise rather than a minor dispersion error. We report the
+median and upper quantiles of $\rho$ on normal, spike, and drop regimes. If
+incident failures are dominated by very large $\rho$, then variance-only
+calibration methods such as global widening, EAE/CO-style scaling, or tail
+scale heads cannot recover conditional coverage without globally sacrificing
+sharpness. This decomposition is used to determine whether a failure should
+be addressed by mean correction, variance calibration, or reported as an
+irreducible regime surprise under the available inputs.
+
+\section{Experiments}
+
+\subsection{Protocol and Integrity Checks}
+All reported probabilistic metrics are computed after inverse transforming to
+the physical traffic scale. Earlier test-swept or scale-inconsistent numbers
+are excluded. We enforce five checks before a result is eligible for the main
+paper: (i) the bare frozen backbone and the mean-preserving residual model
+must have identical point MAE/RMSE when the point estimate is the ensemble
+mean; (ii) frozen backbones must be reproduced at literature-level accuracy;
+(iii) scale or conformal parameters are selected on validation data only;
+(iv) CRPS is computed with the same number of samples across probabilistic
+models; and (v) event-subset results report sample size and paired bootstrap
+confidence intervals. These checks are designed to avoid impossible point
+improvements, test-selection leakage, and unit-mismatched CRPS values.
+
+\subsection{Datasets and Backbones}
+We evaluate on PeMS04 and PeMS08. A critical precondition is reproducing the
+frozen deterministic backbone at literature-level accuracy. Current AGCRN on
+PeMS04 reproduces the reported benchmark level, while PeMS08 PDFormer/AGCRN
+remain weaker than published numbers and are therefore marked as requiring
+backbone repair before final claims. Final tables will be regenerated after
+this repair.
+
+\subsection{Same-Backbone Baselines}
+To avoid attributing a strong frozen mean to the residual layer, the final
+comparison uses the same deterministic backbone whenever possible. We include:
+(1) the bare frozen backbone; (2) heteroscedastic Gaussian residuals;
+(3) residual diffusion; (4) split-conformal residual intervals; (5)
+RDIT-style residual scale calibration, including EAE/CO-style validation
+calibration; and (6) external probabilistic baselines such as CSDI, PriSTI,
+DiffSTG, and SpecSTG. When a baseline cannot be conditioned on the same
+backbone, we report this limitation explicitly and avoid causal claims about
+method superiority.
+
+\subsection{Main Aggregate Results}
+Table~\ref{tab:trusted_main} summarizes the currently available results.
+It is a living diagnostic table rather than the final T-ITS main table:
+rows marked as diagnostic are excluded from final superiority claims until
+backbone repair, paired external-baseline tests, and final validation-selected
+test regeneration finish. The current defensible claim is not aggregate CRPS
+SOTA: CSDI has lower PeMS08 CRPS but severely under-covers. Instead, the
+gate-selected Gaussian-B result supports a reliability-oriented claim of
+near-nominal coverage at higher-but-competitive CRPS and without diffusion
+sampling.
+
+\begin{table*}[t]
+\centering
+\caption{Current experimental evidence under the mean-preserving protocol.
+Values are in physical traffic units. Lower MAE/RMSE/CRPS/MPIW is better;
+higher PICP90 is better. ``External'' rows do not share the frozen backbone.
+Rows marked diagnostic are not used as SOTA claims. PeMS08 Gaussian-A/B and
+diffusion rows are reported on the matched G1 validation-gate subset after
+disjoint recalibration; PeMS04 scale rows are validation-selected audit rows.}
+\label{tab:trusted_main}
+\footnotesize
+\begin{tabular}{llcccccl}
+\toprule
+Dataset & Method & MAE & RMSE & CRPS & PICP90 & MPIW90 & Status \\
+\midrule
+PeMS08 & CSDI (external) & 15.656 & 24.633 & 11.597 & 0.687 & 42.258 & lower CRPS; severe under-coverage \\
+PeMS08 & PriSTI (external) & 17.789 & 26.557 & 13.226 & 0.629 & 43.533 & external baseline \\
+PeMS08 & Frozen PDFormer mean & 15.249 & 24.812 & -- & -- & -- & same-backbone point forecast \\
+PeMS08 & Gaussian-B residual (ours) & 16.112 & 26.838 & 12.177 & 0.879 & 66.929 & gate-selected; near-nominal coverage \\
+PeMS08 & Gaussian-A residual & 16.112 & 26.838 & 12.228 & 0.886 & 70.137 & G1 gate comparison \\
+PeMS08 & Residual diffusion & 16.112 & 26.838 & 12.207--12.363 & 0.892--0.895 & 82.9--88.1 & diagnostic; rejected by G1 \\
+PeMS08 & Split conformal residual & 15.249 & 24.812 & -- & 0.901 & 72.207 & coverage baseline \\
+PeMS04 & CSDI (external) & 20.091 & 32.060 & 14.828 & 0.694 & 56.514 & lower CRPS; under-covered \\
+PeMS04 & PriSTI (external) & 22.911 & 34.776 & 16.865 & 0.607 & 56.557 & external baseline \\
+PeMS04 & AGCRN residual diffusion & 19.351 & 31.372 & 18.118--18.280 & 0.126--0.184 & 6.238--7.771 & under-covered; pre-audit \\
+PeMS04 & AGCRN residual diffusion, no sem., scale 3.2 & 19.351 & 31.372 & 16.370 & 0.887 & 99.441 & val-selected audit test; coverage near target \\
+PeMS04 & AGCRN residual diffusion, sem., scale 3.2 & 19.351 & 31.372 & 15.025 & 0.842 & 79.849 & diagnostic only; under-covered \\
+\midrule
+PeMS08 & DiffSTG & 75.55--76.76 & 94.83--95.55 & 65.55--66.26 & 0.20--0.24 & 64--67 & scale failure; excluded \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Current Gate Status: Diffusion or Gaussian Fallback?}
+The diffusion-versus-Gaussian decision was evaluated by a validation-only
+G1 gate. The gate uses a fixed temporal validation split with an embargo,
+requires identical evaluation windows across diffusion, Gaussian-A
+(scale-matched), and Gaussian-B (closed-form residual scale), and performs
+paired bootstrap over window-level CRPS. The decision criterion is applied
+only after matched post-hoc interval recalibration on a disjoint calibration
+subset: diffusion must retain a paired-bootstrap CRPS advantage over the best
+Gaussian arm on the final gate windows, and its recalibrated PICP90 error must
+match or improve the best Gaussian arm, whose recalibrated coverage is
+currently near $0.88$. A first $S=20$ sampling screen showed that diffusion
+can win CRPS on seed 42
+($\Delta\mathrm{CRPS}=-0.132$, 95\% CI $[-0.145,-0.120]$) but had worse
+coverage error than Gaussian-A (PICP90 $0.705$ versus $0.811$). Because this
+may be affected by finite-sample empirical intervals, a matched $S=100$
+recalibrated gate was launched. The Gaussian-A/B arms completed on seed 42
+with PICP90 $0.886/0.879$ and CRPS $12.228/12.177$ on the recalibrated gate
+subset. The three $S=100$ diffusion sampling seeds all pass the recalibrated
+coverage criterion but fail the CRPS criterion against Gaussian-B. Diffusion
+achieves PICP90 near $0.895$, closer to nominal than Gaussian-B's $0.879$, but
+Gaussian-B has consistently lower CRPS near $12.176$ versus diffusion near
+$12.207$. Thus Track-1 does not justify diffusion as a necessary residual
+generator. Two additional clean training-seed checkpoints (seeds 123 and 2024)
+also fail the CRPS gate after recalibration: diffusion improves coverage
+relative to Gaussian-B but has significantly higher paired CRPS. The current
+evidence therefore supports pivoting the deployable residual generator to
+closed-form Gaussian-B calibration and treating diffusion as an expensive
+candidate rejected by the validation gate.
+
+\begin{table}[t]
+\centering
+\caption{Current result of the $S=100$ recalibrated G1 validation gate.
+All rows use the same clean PeMS08 configuration, identical temporal
+validation split, and the final gate subset after disjoint recalibration.
+$\Delta$CRPS is diffusion minus Gaussian-B; lower is better.}
+\label{tab:g1_recal_status}
+\footnotesize
+\begin{tabular}{lccccl}
+\toprule
+Replicate & Diff. CRPS & G-B CRPS & Diff. PICP90 & $\Delta$CRPS CI95 & Gate \\
+\midrule
+sample 42 & 12.207 & 12.177 & 0.895 & $[-0.014,\,0.073]$ & fail CRPS \\
+sample 123 & 12.208 & 12.176 & 0.895 & $[-0.012,\,0.075]$ & fail CRPS \\
+sample 2024 & 12.206 & 12.176 & 0.895 & $[-0.013,\,0.073]$ & fail CRPS \\
+train 123 & 12.363 & 12.177 & 0.892 & $[0.137,\,0.235]$ & fail CRPS \\
+train 2024 & 12.279 & 12.177 & 0.894 & $[0.055,\,0.149]$ & fail CRPS \\
+\midrule
+Conclusion & -- & -- & -- & -- & pivot to Gaussian-B \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation: Why Not Residual Diffusion?}
+Under the same frozen mean, residual diffusion is not accepted as the final
+generator. The decisive comparison is against the stronger of Gaussian-A and
+Gaussian-B after matched sampling and validation-only recalibration. We
+therefore compare recalibrated diffusion against recalibrated Gaussian
+intervals, not raw diffusion coverage against raw Gaussian coverage. Both the
+sampling-seed and independent training-seed gates support the fallback:
+diffusion closes the coverage gap but does not retain a CRPS advantage over
+Gaussian-B. Under a validation-honest gate with paired bootstrap testing,
+diffusion fails all five sampling/training replicates; the two independent
+training-seed replicates show strictly positive CRPS-difference intervals.
+We therefore pivot the deployable residual generator to Gaussian-B and report
+diffusion as a more expensive candidate rejected by the necessity gate.
+
+\subsection{PeMS04 Coverage-Collapse Audit}
+The initial PeMS04 AGCRN residual-diffusion row was severely under-covered
+(PICP90 $0.126$--$0.184$), with MPIW90 only $6.238$--$7.771$ despite MAE near
+$19.35$. We therefore treat it as a separate integrity audit rather than a
+minor calibration detail. A validation-only scale sweep with the same no-semantic
+checkpoint shows that the collapse is dominated by over-shrunk residual samples:
+increasing the residual sample scale from 1.0 to 3.0 raises PICP90 from 0.535
+to 0.880 and reduces Winkler score from 214.971 to 145.972. A finer sweep shows
+that scale 3.2 is the closest target-coverage setting (PICP90 0.895), while
+3.4 and 3.6 over-cover and monotonically increase CRPS and interval width.
+Table~\ref{tab:pems04_scale_audit} records this diagnostic result.
+
+To avoid cross-configuration leakage, the PeMS04 no-semantic test row uses the
+scale selected only by the no-semantic validation sweep: among the audited
+scales, 3.2 is closest to nominal PICP90 without crossing into clear
+over-coverage. The semantic rows at the same scale are reported only as a
+diagnostic semantic-vs-no-semantic probe, not as a separately selected
+configuration. They reveal a CRPS--coverage trade-off rather than a PeMS04
+win: semantic conditioning lowers CRPS (15.025 on test) but under-covers
+(PICP90 0.842), whereas the no-semantic selected row approaches nominal
+coverage (PICP90 0.887) at substantially higher CRPS and width. Therefore
+PeMS04 is not used as a positive SOTA claim; it is evidence for calibration
+integrity auditing and for the cost of restoring coverage.
+
+\begin{table}[t]
+\centering
+\caption{PeMS04 validation-only coverage audit for the no-semantic AGCRN
+residual-diffusion checkpoint. The audit isolates residual sample scale while
+holding the frozen mean and checkpoint fixed.}
+\label{tab:pems04_scale_audit}
+\footnotesize
+\begin{tabular}{lcccc}
+\toprule
+Scale & CRPS & PICP90 & MPIW90 & Winkler90 \\
+\midrule
+1.0 & 16.027 & 0.535 & 32.042 & 214.971 \\
+3.0 & 16.272 & 0.880 & 96.140 & 145.972 \\
+3.2 & 16.505 & 0.895 & 102.530 & 146.819 \\
+3.4 & 16.761 & 0.908 & 108.930 & 148.372 \\
+3.6 & 17.037 & 0.919 & 115.362 & 150.572 \\
+4.0 & 17.646 & 0.937 & 128.166 & 156.481 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Incident/Drop Failure-Mode Analysis}
+The strongest ITS-specific hypothesis is that aggregate CRPS hides severe
+incident/drop failures. In preliminary PeMS08 drop subsets, globally widened
+intervals and Gaussian residuals still exhibit near-zero coverage under
+large traffic drops. The final analysis will distinguish two cases. If the
+failure is mainly dispersion-level, calibrated scale or conformal intervals
+should recover coverage with controlled sharpness. If the failure is
+mean-level, then variance-only methods will fail even when intervals are
+widened, implying that incident-aware mean correction or additional causal
+inputs are necessary. The formal protocol is:
+\begin{itemize}
+    \item define drop/incident windows reproducibly, either from incident logs
+    or a pre-specified flow-drop rule, and explicitly state whether the subset
+    is outcome-conditioned;
+    \item report subset size, MAE, CRPS, PICP, MPIW, Winkler score, and
+    bootstrap confidence intervals;
+    \item compare residual diffusion, Gaussian residuals, conformal residuals,
+    RDIT-style calibration, CSDI, PriSTI, DiffSTG, and SpecSTG;
+    \item report the mean-vs-dispersion ratio $\rho$ to determine whether the
+    miss is caused by the frozen mean or by insufficient interval width.
+\end{itemize}
+
+Current PeMS08 event-subset results support the mean-shift interpretation.
+On drop windows, residual diffusion and heteroscedastic Gaussian residuals
+both have PICP90 equal to 0.000, while CSDI reaches only 0.028 and PriSTI also
+has 0.000. Their drop CRPS values are extremely large (ours 238.182,
+Gaussian 234.361, CSDI 225.201, PriSTI 192.215), showing that the failure is
+shared across probabilistic families. On spike windows, coverage is high
+(ours PICP90 1.000, CSDI 0.979), but CSDI has lower spike CRPS (6.639 versus
+12.336). This asymmetry indicates that drop events are dominated by a
+mean-level regime shift rather than simply insufficient variance.
+
+\subsection{Current Innovation and Experimental Scope}
+The current paper should be framed around four traffic-specific innovations
+rather than a generic residual-diffusion claim. First, it gives a
+same-backbone, mean-preserving protocol in which the probabilistic residual
+layer cannot change point MAE/RMSE, enabling fair isolation of calibration
+quality. Second, it contributes a validation-honest generator-selection gate:
+diffusion is not assumed to be superior, and the current evidence selects
+closed-form Gaussian-B because it has significantly lower paired CRPS after
+matched recalibration. Third, it contributes an incident/drop reliability
+protocol with paired window-level bootstrap, per-horizon reliability, and
+explicit validation-only calibration. Fourth, it introduces a mean-vs-dispersion
+diagnostic that explains when coverage failure is caused by frozen-mean regime
+shift and when variance calibration can plausibly help. Semantic conditioning
+is currently a negative or optional diagnostic factor, not a headline
+contribution.
+
+\subsection{Conformal Calibration}
+Because current PICP90 values are below nominal coverage, the final revision
+adds split conformal calibration on validation residuals. Conformal intervals
+will be reported at multiple nominal levels (50/80/90/95), together with
+reliability diagrams and sharpness--coverage curves. This addition is
+necessary before using the word ``calibrated'' in a deployment-facing sense.
+
+\subsection{Required Completion Experiments}
+Before submission, the following experiments are treated as mandatory rather
+than optional:
+\begin{itemize}
+    \item run paired Gaussian-B versus CSDI tests on aligned windows if CSDI
+    per-window samples can be mapped to the same temporal gate. This determines
+    whether the PeMS08 CRPS gap (12.177 versus 11.597 in the current evidence)
+    can be described as competitive or must be described as significantly
+    higher CRPS with substantially better coverage;
+    \item regenerate the final main table around the gate-selected Gaussian-B
+    residual calibration layer rather than residual diffusion, including
+    multi-seed statistics and paired bootstrap/Wilcoxon tests;
+    \item repair or explicitly bound the PeMS08 deterministic backbone gap
+    against published PDFormer/AGCRN numbers before making final main-table
+    claims;
+    \item keep PeMS04 as a calibration-integrity audit unless a single
+    validation-selected configuration simultaneously restores coverage and
+    competitive CRPS; do not select semantic versus no-semantic by looking at
+    test results;
+    \item implement event-conditioned calibration on validation/calibration
+    incidents and score held-out test incidents only once;
+    \item add SpecSTG and RDIT/FUSE-Traffic positioning, while keeping DiffSTG
+    out of the main table unless its scale issue is fixed;
+    \item add per-horizon reliability diagrams, sharpness--coverage curves,
+    efficiency analysis for the rejected diffusion candidate, and final
+    validation-selected test rows written through the result writer.
+\end{itemize}
+Results that fail these checks are kept out of the main claims.
+
+\subsection{Negative Results and Semantic Conditioning}
+Earlier semantic prompt variants did not consistently improve aggregate
+forecasting, and naive incident-tail variants degraded full-test CRPS while
+failing to recover drop coverage. We therefore remove semantic prompting from
+the headline method. Semantic embeddings are evaluated only as one possible
+event-conditioning source against non-semantic volatility/change-point
+signals. If they do not improve incident calibration, the result is reported
+as a negative finding.
+
+\section{Conclusion}
+
+This paper is repositioned as a diagnostic study of residual probabilistic
+traffic forecasting under incident regimes. Because recent work such as CARD,
+RDIT, D3U/TMDM-style methods, and FALDA/DMRR already establishes much of the
+generic residual-diffusion and residual-calibration paradigm, our contribution
+must be judged by traffic-specific evidence: same-backbone fairness,
+validation-honest calibration, incident/drop reliability, and root-cause
+analysis. The current evidence supports a decisive pivot: residual diffusion is
+rejected by a validation-honest paired gate, and the deployable residual layer
+becomes closed-form Gaussian-B calibration. This does not establish aggregate
+CRPS SOTA: CSDI currently has lower PeMS08 CRPS but severe under-coverage.
+The defensible claim is instead calibration-oriented: near-nominal coverage at
+higher-but-competitive CRPS, with no diffusion sampling and with explicit
+failure-mode diagnostics. PeMS04 further shows that restoring coverage can
+require a large width/CRPS cost, so it is reported as a calibration audit rather
+than a positive SOTA result. The final submission will therefore prioritize
+paired external-baseline tests, backbone repair, RDIT/FUSE-style positioning,
+split-conformal calibration, and mean-vs-dispersion decomposition.
+
+\bibliographystyle\bibliographystyle{IEEEtran}
+\bibliography{prompt-stdiff-refs}
+
+\end{document}

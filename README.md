@@ -297,3 +297,68 @@ python infer.py --config configs/default.yaml --ckpt outputs/checkpoints/best.pt
 - 物理图默认采用论文式对称归一化（`physical_norm_mode: sym`），并支持 `physical_sigma: auto`。
 - 训练默认 `K=50`，评估默认 `num_eval_samples=100` 用于 CRPS 与分布均值指标。
 - 对论文未明确的实现细节已在代码中用 `ASSUMPTION` 标注。
+
+## 9. Incident-gated 残差均值修正（diagnose → repair）
+
+`ρ` 分解（`scripts/eval_event_root_cause.py`）证明 incident/drop 上的覆盖失效是
+**均值级**（`ρ ≫ 1`）而非方差级，因此 widening / conformal / tail-scale 这类
+**只改方差**的方法理论上修不了。为此新增一个**门控的残差均值修正**机制，把 `ρ`
+从“诊断指标”升级为“修复机制”：
+
+- `RegimeShiftHead`：从泄漏安全的历史/语义条件预测每个 `(node, horizon, feature)`
+  的 regime-shift 门 `g ∈ [0, 1]`（检测器），默认偏置使其初始接近 0。
+- `MeanCorrectionHead`：预测**有符号**的均值平移 `δ`（不是正的乘性 scale），可双向
+  移动预测中心。
+- `GraphMeanPropagator`：沿物理图 `A_phy` 把 `g·δ` 传播到下游邻居
+  （`Σ_k w_k A^k (g·δ)`，`w_k` 用 softmax 且 identity 初始化），让单个检测到的
+  drop 修正它在空间上引发的相关 drop。
+
+修正后的预测为 `μ̂ + propagate(g · δ)`，对所有 ensemble 样本**同样平移**，因此只移动
+**中心**、不改变**离散度**（残差谱）。门稀疏 + 传播器 identity 初始化 ⇒ 非 incident
+位置保持均值保持（mean-preserving）默认，full-test 点精度按构造不变。
+
+### 两种评估模式（保留受控公平性 C1）
+
+- **严格均值保持模式**：`use_incident_mean_correction: false`（或对已训练模型调用
+  `model.set_incident_correction_enabled(False)`），门强制关闭，等价于原始受控
+  scaffold，用于 diffusion-vs-Gaussian 的同 backbone 对比。
+- **Incident-corrected 模式**：`use_incident_mean_correction: true`，门生效，作为新方法。
+
+### 训练（复用 freeze-tail 协议）
+
+加载已训练的残差扩散栈，仅训练修正头：
+
+```bash
+python train.py --config configs/pems08_incident_mean_correction.yaml --gpu_id 0
+```
+
+关键配置项：
+
+```yaml
+model:
+  use_incident_mean_correction: true
+  incident_correction_graph_hops: 2
+  incident_correction_max_shift: 4.0
+  incident_correction_gate_bias: -4.0
+train:
+  loss_regime_detect_weight: 1.0        # 检测损失 (BCE)
+  loss_mean_correction_weight: 1.0      # 在检测位置回归 g·δ → 真实均值残差
+  loss_correction_sparsity_weight: 0.1  # 非 incident 位置抑制修正，保住 full-test MAE
+  incident_regime_threshold: 2.0        # 标准化残差幅度阈值定义 regime 标签
+  freeze_except_prefixes:
+  - regime_shift_head
+  - mean_correction_head
+  - mean_correction_propagator
+```
+
+### 评估闭环（收口 C3）
+
+修正在 `trainers/evaluator.py`、`scripts/eval_event_subset.py`、`infer.py` 的采样
+路径中通过 `model.apply_mean_correction(...)` 应用。修正后重跑
+`scripts/eval_event_root_cause.py`，预期 headline 结果为
+**“drop 上 `ρ` 由 7–62 降向 ≈1、drop-PICP 由 ≈0 升向 nominal，而 off-incident 指标不变”**，
+即同时 *diagnose*（`ρ`）并 *repair* 了方差类方法修不了的均值级失效。
+
+> 完整性要求：门阈值的选择必须仅用 validation（避免 test 泄漏）；并应报告
+> off-incident `ΔMAE ≈ 0` 以证明没有用全局精度换取 incident 覆盖。
+

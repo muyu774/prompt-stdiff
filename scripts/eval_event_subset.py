@@ -347,6 +347,12 @@ def _load_model_event_arrays(args: argparse.Namespace, config: Mapping, device: 
             residual = model.unstandardize_residual(ensemble)
             residual = model.calibrate_residual_samples(residual, x_his=x_his, z_sem=z_sem_batch)
             ensemble = residual + mean_pred.unsqueeze(0)
+            ensemble = model.apply_mean_correction(
+                ensemble,
+                x_his=x_his,
+                z_sem=z_sem_batch,
+                a_phy=a_phy,
+            )
         if bool(config.get("model", {}).get("predict_residual", False)) and not bool(getattr(model, "uses_absolute_mean_predictor", False)):
             baseline = x_his[:, -1:, :, :].expand(-1, hh, -1, -1)
             ensemble = ensemble + baseline.unsqueeze(0)

@@ -180,6 +180,16 @@ def main() -> None:
         incident_tail_max_scale=float(mcfg.get("incident_tail_max_scale", 4.0)),
         incident_tail_use_semantic=bool(mcfg.get("incident_tail_use_semantic", True)),
         incident_tail_df=float(mcfg.get("incident_tail_df", 3.0)),
+        use_incident_mean_correction=bool(mcfg.get("use_incident_mean_correction", False)),
+        incident_correction_hidden_dim=(
+            int(mcfg["incident_correction_hidden_dim"])
+            if mcfg.get("incident_correction_hidden_dim") is not None
+            else None
+        ),
+        incident_correction_use_semantic=bool(mcfg.get("incident_correction_use_semantic", True)),
+        incident_correction_max_shift=float(mcfg.get("incident_correction_max_shift", 4.0)),
+        incident_correction_graph_hops=int(mcfg.get("incident_correction_graph_hops", 2)),
+        incident_correction_gate_bias=float(mcfg.get("incident_correction_gate_bias", -4.0)),
     ).to(device)
     if mean_predictor is not None and bool(mean_predictor_cfg.get("residual_standardize", True)):
         model.set_residual_standardizer(
@@ -268,6 +278,12 @@ def main() -> None:
                 residual = model.unstandardize_residual(pred.unsqueeze(0))
                 residual = model.calibrate_residual_samples(residual, x_his=x_his, z_sem=z_sem_batch)
                 pred = residual.squeeze(0) + mean_pred
+                pred = model.apply_mean_correction(
+                    pred,
+                    x_his=x_his,
+                    z_sem=z_sem_batch,
+                    a_phy=a_phy,
+                )
             if (
                 bool(config.get("model", {}).get("predict_residual", False))
                 and not bool(getattr(model, "uses_absolute_mean_predictor", False))

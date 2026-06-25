@@ -1,0 +1,40 @@
+# Teleop configuration: Perception Neuron -> Inspire Hand -> Isaac.
+
+mocap:
+  # source: "bvh" replays a recorded file; "udp" receives the live
+  # Axis Neuron / Axis Studio ASCII BVH stream.
+  source: bvh
+  bvh:
+    path: assets/sample_hand.bvh
+    realtime: false
+    loop: false
+  udp:
+    ref_bvh: assets/sample_hand.bvh   # reference skeleton for column order
+    host: 0.0.0.0
+    port: 7002
+    timeout: 5.0
+    with_displacement: true
+
+retarget:
+  hand_prefix: RightHand
+  flexion_axis: 2          # 0=X, 1=Y, 2=Z
+  flexion_min_deg: 0.0     # open hand
+  flexion_max_deg: 90.0    # closed hand
+  thumb_rot_axis: 1
+  thumb_rot_min_deg: -10.0
+  thumb_rot_max_deg: 60.0
+  output_min: 0
+  output_max: 1000
+  invert_flexion: true
+  invert_thumb_rot: false
+
+sim:
+  # backend: "dummy" records commands (no GPU); "isaac" drives Isaac Gym.
+  backend: dummy
+  smoothing: 0.5
+  isaac:
+    asset_root: assets
+    asset_file: inspire_hand.urdf
+    device: cuda:0
+    headless: false
+    dt: 0.0166667

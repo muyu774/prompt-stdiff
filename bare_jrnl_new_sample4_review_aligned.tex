@@ -110,7 +110,8 @@ accuracy and isolates the probabilistic model's role: it should calibrate
 uncertainty, not silently improve or degrade the mean forecast.
 
 This formulation is related to recent decoupled deterministic--stochastic
-forecasting methods such as CARD \cite{han2022card}. We therefore do not
+forecasting methods such as CARD, RDIT, and FALDA/DMRR
+\cite{han2022card,lai2025rdit,wang2025falda,qi2026diffusionresidual}. We therefore do not
 claim mean preservation or residual diffusion alone as a new generic
 time-series mechanism. Instead, our focus is ITS-specific: we instantiate and
 stress-test this paradigm on graph traffic forecasting, compare diffusion
@@ -270,14 +271,18 @@ Therefore, the ensemble mean equals the frozen deterministic forecast by
 construction. This is a deliberate design choice: point accuracy is inherited
 from the backbone, and the residual layer is judged by uncertainty quality.
 
-\subsection{Heteroscedastic Residual Scale}
-We further use a residual scale factor $a_{h,n}$, parameterized by horizon,
+\subsection{Heteroscedastic Residual Scale (Optional)}
+We optionally use a residual scale factor $a_{h,n}$, parameterized by horizon,
 node, or node groups, to control predictive spread:
 \begin{equation}
     R^{(j)} \leftarrow a_{h,n} R^{(j)}.
 \end{equation}
-The scale is selected on validation data unless explicitly stated. Test-set
-sweeps are reported only as diagnostic curves, not as headline results.
+The scale is selected on validation data. Test-set
+sweeps are reported only as diagnostic curves, not as headline results. In our
+experiments the deployable configurations use a single global, validation-selected
+scale rather than a node- or group-heteroscedastic head; the per-node
+parameterization is retained only as an optional extension and is not required by
+any reported conclusion.
 
 \subsection{Gaussian and Global-Widening Baselines}
 To test whether diffusion is necessary, we compare against a
@@ -287,7 +292,7 @@ answer two reviewer-critical questions: whether diffusion improves beyond a
 simple parametric residual, and whether coverage gains are merely the result
 of wider intervals.
 
-\subsection{Incident-Conditioned Tail Calibration}
+\subsection{Incident-Conditioned Tail Calibration (Optional)}
 We optionally attach a tail-scale head $g_\psi$ that amplifies residual
 variance under event conditions:
 \begin{equation}
@@ -296,8 +301,9 @@ variance under event conditions:
 where $c_{t,n,h}$ may be a non-semantic volatility/change-point signal or a
 semantic event embedding. The main residual model is frozen when training
 this head. This module is treated as a hypothesis under test, not as an
-assumed contribution: if it fails to improve incident/drop coverage without
-unacceptable aggregate degradation, it is reported as a negative finding.
+assumed contribution. In our experiments it does not improve incident/drop
+coverage without unacceptable aggregate degradation, so it is reported as a
+negative finding and is excluded from the deployable configuration.
 
 \subsection{Mean-vs-Dispersion Root-Cause Decomposition}
 For an event subset, interval failure can arise from two different mechanisms:
@@ -340,9 +346,11 @@ improvements, test-selection leakage, and unit-mismatched CRPS values.
 We evaluate on PeMS04 and PeMS08. A critical precondition is reproducing or
 explicitly bounding the frozen deterministic backbone at literature-level
 accuracy. AGCRN on PeMS04 reproduces the reported benchmark level. For PeMS08,
-we keep same-backbone residual comparisons separate from external-number
-comparisons unless the PDFormer backbone is reproduced within the stated
-tolerance.
+because the PDFormer backbone does not reproduce the published point accuracy
+within the stated tolerance (see the Backbone Reproduction Audit), we keep
+same-backbone residual comparisons separate from external-number comparisons and
+treat PeMS08 external-number comparisons as diagnostic rather than
+same-backbone superiority claims.
 
 \subsection{Same-Backbone Baselines}
 To avoid attributing a strong frozen mean to the residual layer, the final
@@ -368,7 +376,7 @@ claiming that a single PeMS08 metric alone proves Gaussian-B.
 
 \begin{table*}[t]
 \centering
-\caption{Current experimental evidence under the mean-preserving protocol.
+\caption{Experimental evidence under the mean-preserving protocol.
 Values are in physical traffic units. Lower MAE/RMSE/CRPS/MPIW is better;
 higher PICP90 is better. ``External'' rows do not share the frozen backbone.
 Rows marked diagnostic are not used as SOTA claims. Gaussian-B is the
@@ -408,7 +416,7 @@ unified PeMS08 comparison. Against PriSTI, Gaussian-B is better in both CRPS and
 coverage. Thus the evidence supports a calibration-reliability claim, not an
 aggregate-CRPS SOTA claim.
 
-\subsection{Current Gate Status: Criterion-Robust Selection}
+\subsection{Gate Status: Criterion-Robust Selection}
 The diffusion-versus-Gaussian decision must be aligned with the paper's stated
 objective. If the contribution is calibration reliability rather than
 aggregate-CRPS SOTA, the validation gate must predeclare its scoring rule and
@@ -640,7 +648,7 @@ formal protocol is:
     miss is caused by the frozen mean or by insufficient interval width.
 \end{itemize}
 
-Current PeMS08 event-subset results support the mean-shift interpretation.
+The PeMS08 event-subset results support the mean-shift interpretation.
 Table~\ref{tab:event_refresh} reports a refreshed event evaluation using a
 deduplicated set of event-local forecast positions. The drop subset is small
 ($36$ forecast points from $3$ events), so we treat it as a diagnostic stress
@@ -705,26 +713,6 @@ Spike & PriSTI & 48 & 1.000 & 0.305 & 0.691 & 20.715 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-\subsection{Current Innovation and Experimental Scope}
-The current paper should be framed around four traffic-specific innovations
-rather than a generic residual-diffusion claim. First, it gives a
-same-backbone, mean-preserving protocol in which the probabilistic residual
-layer cannot change point MAE/RMSE, enabling fair isolation of calibration
-quality. Second, it contributes a validation-honest generator-selection gate
-that explicitly reports scoring-rule sensitivity. Diffusion is not assumed to
-be superior, and the paper does not choose the criterion most favorable to any
-method after inspecting test performance; instead, it asks which residual
-generator is robust enough across datasets, criteria, and seeds. The current
-evidence favors closed-form Gaussian-B as the deployable residual-calibration
-layer, while retaining CSDI/PriSTI as external baselines rather than
-same-backbone residual generators. Third, it contributes an incident/drop
-reliability protocol with paired window-level diagnostics, per-horizon
-reliability, and explicit validation-only calibration. Fourth, it introduces a
-mean-vs-dispersion diagnostic that explains when coverage failure is caused by
-frozen-mean regime shift and when variance calibration can plausibly help.
-Semantic conditioning is currently a negative or optional diagnostic factor, not
-a headline contribution.
 
 \subsection{Split-Conformal Reliability Audit}
 We also run a split-conformal reliability audit on validation residuals at
@@ -810,7 +798,7 @@ forecasting, and naive incident-tail variants degraded full-test CRPS while
 failing to recover drop coverage. We therefore remove semantic prompting from
 the headline method. Semantic embeddings are evaluated only as one possible
 event-conditioning source against non-semantic volatility/change-point
-signals; in the current evidence they do not provide a stable headline
+signals; in our evidence they do not provide a stable headline
 improvement and are therefore reported as a negative finding.
 
 \section{Conclusion}

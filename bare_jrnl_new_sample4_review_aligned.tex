@@ -33,7 +33,7 @@
 
 \begin{document}
 
-\title{Diagnosing Incident-Regime Failures in Mean-Preserving Residual Probabilistic Traffic Forecasting}
+\title{HLC-CQR: Hierarchical Load-Conditioned Conformal Calibration for Mean-Preserving Traffic Uncertainty}
 
 \author{Ziyu~Wang, Kaijie~Xu, and Lin~Qiu%
 \thanks{Ziyu Wang, Kaijie Xu, and Lin Qiu are with Zhejiang University, Hangzhou, Zhejiang, China.}%
@@ -42,40 +42,45 @@
 
 % The paper headers. Update the journal/volume fields before submission.
 \markboth{Journal Manuscript Draft}%
-{Wang \MakeLowercase{\textit{et al.}}: Incident-Regime Failures in Probabilistic Traffic Forecasting}
+{Wang \MakeLowercase{\textit{et al.}}: HLC-CQR for Mean-Preserving Traffic Uncertainty}
 
 \maketitle
 
 \begin{abstract}
-Probabilistic traffic forecasting is often evaluated by aggregate metrics
-such as the continuous ranked probability score (CRPS), yet such averages can
-hide safety-critical failures under incident-driven regime shifts. This paper
-studies this issue through the lens of mean-preserving residual probabilistic
-forecasting: a deterministic traffic backbone supplies a frozen point forecast,
-and a probabilistic residual layer models uncertainty around that mean. Because
-closely related residual-diffusion and residual-regression paradigms have
-recently appeared in CARD, RDIT, FALDA/DMRR, and other residual-calibration
-work \cite{han2022card,lai2025rdit,wang2025falda,qi2026diffusionresidual}, we do
-not claim mean-preserving residual diffusion as a generic methodological
-novelty. Instead, we use it as a controlled experimental scaffold for traffic
-systems: all residual models share the same frozen backbone, the same scaler,
-and the same splits, allowing us to separate point-forecast quality from
-uncertainty calibration. We do not claim a single probabilistic model that wins
-under every scoring rule. Instead, the evidence supports a robustness-oriented
-selection: closed-form heteroscedastic Gaussian residual calibration
-(Gaussian-B) is the residual generator that remains reliable across datasets,
-scoring rules, and seeds, whereas the diffusion residual's apparent advantage is
-dataset-specific and fragile. On PeMS08, its ranking changes with CRPS,
-coverage, and Winkler-style interval criteria; on PeMS04, it collapses under the
-same mean-preserving protocol. We further show that aggregate CRPS can mask
-severe conditional under-coverage on drop subsets, motivating an incident-regime
-evaluation protocol with validation-selected calibration, per-horizon
-reliability analysis, paired window-level statistics, and a mean-vs-dispersion
-root-cause decomposition.
+Probabilistic traffic forecasting is often summarized by aggregate metrics such
+as the continuous ranked probability score (CRPS), yet deployment-facing
+interval quality depends more directly on coverage, sharpness, and conditional
+reliability under heterogeneous traffic regimes. This paper therefore centers a
+mean-preserving frozen-backbone protocol in which a deterministic traffic model
+supplies the point forecast and the uncertainty layer only calibrates intervals
+around that fixed mean. Within this setting, we upgrade the main traffic
+calibration narrative from coarse split conformal or naive load-conditioned CQR
+to \emph{Hierarchical Load-Conditioned CQR (HLC-CQR)}: a traffic-structured
+hierarchical conformal calibration algorithm for frozen-backbone traffic
+uncertainty. HLC-CQR is not proposed as a new conformal coverage theorem.
+Rather, it extends the Mondrian/group-conditional CQR-load family with a
+traffic hierarchy and sample-size-adaptive shrinkage so that fine
+node$\times$horizon$\times$load$\times$time-of-day groups remain usable when
+calibration samples are sparse. Across PeMS08 and PeMS04, the main
+eight-seed $\alpha=0.10$ results show that HLC-CQR achieves the best Winkler
+score on both datasets while maintaining near-nominal coverage
+($\mathrm{PICP}\ge 0.894$) and near-best conditional reliability. A
+pre-registered $\tau=20$ shrinkage setting gives the main results; $\tau=50$ is
+reported only as a sensitivity check. Stress tests that downsample calibration
+data show the key distinction from naive fine Mondrian calibration: under full
+calibration HLC-CQR is only modestly better than load$\times$TOD grouping, but
+under sparse calibration it degrades gracefully and preserves the best interval
+score. Against an external CSDI interval anchor, HLC-CQR improves Winkler score
+on both datasets with tight paired confidence intervals. A one-seed PDFormer
+diagnostic further preserves the same conformal ordering on an additional
+backbone. Legacy Gaussian-B, diffusion, and incident-drop diagnostics are
+retained as background evidence, but the main contribution is now a
+traffic-structured hierarchical calibration method for reliable frozen-backbone
+traffic intervals.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Probabilistic traffic forecasting, residual calibration, uncertainty calibration, incident analysis, intelligent transportation systems.
+Probabilistic traffic forecasting, conformal calibration, hierarchical calibration, uncertainty calibration, intelligent transportation systems.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -100,65 +105,68 @@ conditional failure is often more consequential than a small aggregate CRPS
 improvement.
 
 This paper therefore revisits probabilistic traffic forecasting from a
-failure-mode and calibration perspective. We study a modular
-mean-preserving residual forecasting paradigm. A deterministic backbone such
-as PDFormer or AGCRN produces a frozen point forecast, and a residual
-probabilistic layer models uncertainty around that forecast. During inference,
-residual samples are centered so that the predictive ensemble mean matches
-the deterministic backbone. This design intentionally preserves point
-accuracy and isolates the probabilistic model's role: it should calibrate
-uncertainty, not silently improve or degrade the mean forecast.
+calibration perspective. We study a modular mean-preserving residual
+forecasting paradigm. A deterministic backbone such as STID, PDFormer, or
+AGCRN produces a frozen point forecast, and the uncertainty layer calibrates
+intervals around that fixed mean. During inference, all residual or interval
+adjustments preserve the deterministic point estimate, intentionally isolating
+uncertainty calibration from point-forecast quality.
 
 This formulation is related to recent decoupled deterministic--stochastic
 forecasting methods such as CARD \cite{han2022card}. We therefore do not
 claim mean preservation or residual diffusion alone as a new generic
-time-series mechanism. Instead, our focus is ITS-specific: we instantiate and
-stress-test this paradigm on graph traffic forecasting, compare diffusion
-residuals against simpler heteroscedastic Gaussian residuals, and evaluate
-whether aggregate calibration transfers to incident/drop regimes. This
-positioning is important because a simpler Gaussian residual layer may be
-preferable if diffusion does not provide a measurable advantage where it
-matters.
+time-series mechanism. Instead, our ITS-specific focus is the
+granularity--sample-efficiency trade-off that appears when conformalized
+quantile regression is conditioned on traffic structure. Coarse conformal
+intervals are stable but blunt. Fine Mondrian or CQR-load calibration on
+node$\times$horizon$\times$load or
+node$\times$horizon$\times$load$\times$time-of-day groups is sharper, but it
+becomes unstable when the calibration set is small. Our main method,
+\emph{Hierarchical Load-Conditioned CQR (HLC-CQR)}, addresses this practical
+weakness through a traffic hierarchy and sample-size-adaptive shrinkage over
+groupwise nonconformity corrections.
 
-The experiments lead to three findings. First,
-mean-preserving residual models preserve the frozen backbone's point MAE/RMSE
-by construction, so probabilistic comparisons can be made without silently
-changing the deterministic forecast. Second, the residual-generator ranking is
-not stable enough to justify a diffusion deployment claim: PeMS08 exposes
-criterion sensitivity among CRPS, coverage, and Winkler score, while PeMS04
-removes the ambiguity by showing systematic diffusion under-coverage and stable
-Gaussian-B behavior across seeds. The deployable method therefore pivots to
-Gaussian-B as the robust residual-calibration layer, not as an aggregate-CRPS
-winner over all external probabilistic baselines. Third,
-incident/drop subsets reveal a severe
-conditional-coverage failure that is largely hidden by aggregate metrics. This
-motivates validation-selected calibration, multi-seed paired statistics, and
-conformal calibration as necessary components of a trustworthy traffic
-uncertainty evaluation.
+The experiments lead to four findings. First, mean-preserving calibration
+preserves the frozen backbone's point MAE/RMSE by construction, so interval
+comparisons can be made without silently changing the deterministic forecast.
+Second, HLC-CQR turns load-conditioned CQR from a traffic-specific Mondrian
+instantiation into a hierarchical calibration algorithm: it achieves the best
+main-table Winkler score on both PeMS08 and PeMS04 at near-nominal
+coverage. Third, the distinctive value of HLC-CQR is not a large full-data gain
+over naive load$\times$TOD grouping, but sparse-calibration robustness:
+hierarchical shrinkage resolves the trade-off between fine granularity and
+sample efficiency when calibration groups become sparse. Fourth, retained
+Gaussian-B, diffusion, and incident/drop diagnostics still matter as background:
+they show why aggregate CRPS alone is insufficient and why interval claims must
+be framed honestly as reliability/sharpness results rather than universal
+distributional superiority.
 
 The contributions of this paper are:
 \begin{itemize}
     \item We provide a controlled, same-backbone evaluation protocol for
-    mean-preserving residual probabilistic traffic forecasting, comparing
-    residual diffusion, heteroscedastic Gaussian residuals, conformal residual
-    calibration, and residual-regression baselines under identical frozen
-    point forecasts.
-    \item We introduce a validation-only generator-selection gate and report
-    its criterion sensitivity rather than hiding it. The final deployable
-    residual layer is selected by robustness across datasets, scoring rules, and
-    evaluation settings, which favors closed-form Gaussian-B over residual
-    diffusion.
-    \item We introduce an incident/drop regime evaluation with explicit subset
-    size, paired window-level diagnostics, and per-horizon reliability metrics, showing why
-    aggregate CRPS alone is insufficient for deployment-facing ITS uncertainty.
-    \item We propose a mean-vs-dispersion root-cause decomposition that
-    distinguishes failures caused by unpredictable mean shifts from failures
-    caused by overly narrow predictive intervals. This decomposition clarifies
-    when variance calibration can help and when it cannot.
-    \item We report semantic/event conditioning as an optional diagnostic
-    factor rather than a headline contribution, retaining it only if it improves
-    incident-regime reliability beyond non-semantic volatility or change-point
-    indicators.
+    mean-preserving traffic uncertainty, so calibration methods can be compared
+    under identical frozen point forecasts without conflating interval quality
+    with mean accuracy.
+    \item We propose HLC-CQR, a traffic-structured hierarchical
+    load-conditioned conformal calibration algorithm. HLC-CQR is not presented
+    as a new conformal coverage theorem; rather, it augments the
+    Mondrian/group-conditional CQR-load family with a traffic hierarchy and
+    sample-size-adaptive shrinkage to stabilize fine
+    node$\times$horizon$\times$load$\times$TOD calibration.
+    \item We provide a validation-calibrated, eight-seed empirical study on
+    PeMS08 and PeMS04 showing that HLC-CQR achieves the best main-table
+    Winkler score while keeping near-nominal coverage and near-best conditional
+    reliability on time-of-day and load diagnostics.
+    \item We identify sparse-calibration robustness as the distinctive value of
+    HLC-CQR. A pre-registered $\tau=20$ main setting and a broader $\tau$
+    sensitivity study show that intermediate hierarchical shrinkage resolves the
+    granularity--sample-efficiency trade-off between coarse conformal and naive
+    fine Mondrian calibration.
+    \item We retain Gaussian-B, diffusion, backbone-portability, and
+    incident/drop analyses as background diagnostics, using them to delimit what
+    HLC-CQR does and does not claim: stronger interval reliability and
+    sharpness, not a universal CRPS or full-distribution victory over every
+    external probabilistic model.
 \end{itemize}
 
 \section{Related Work}
@@ -207,7 +215,11 @@ measure different aspects of this trade-off. Conformal prediction provides a
 post-hoc route to marginal coverage guarantees and is especially relevant
 when probabilistic models are overconfident. However, marginal calibration
 alone may still fail conditionally on rare regimes such as incident-driven
-traffic drops. We therefore evaluate both aggregate calibration and
+traffic drops. In this paper, load-conditioned CQR is treated as a
+traffic-specific Mondrian or group-conditional conformal instantiation rather
+than a new theorem. Our algorithmic question is how to retain the sharpness of
+fine traffic groups without losing stability when calibration samples per group
+become sparse. We therefore evaluate both aggregate calibration and
 incident/drop-subset reliability.
 
 \subsection{External Semantics for Traffic Forecasting}
@@ -279,6 +291,40 @@ node, or node groups, to control predictive spread:
 The scale is selected on validation data unless explicitly stated. Test-set
 sweeps are reported only as diagnostic curves, not as headline results.
 
+\subsection{Hierarchical Load-Conditioned CQR}
+Our main interval method is \emph{Hierarchical Load-Conditioned CQR (HLC-CQR)}.
+It starts from the same frozen mean $\hat{\mu}$ but calibrates interval
+corrections over a traffic hierarchy instead of using a single global
+correction. We use five nested traffic group levels:
+\begin{itemize}
+    \item $G_0$: global;
+    \item $G_1$: horizon;
+    \item $G_2$: node$\times$horizon;
+    \item $G_3$: node$\times$horizon$\times$load;
+    \item $G_4$: node$\times$horizon$\times$load$\times$time-of-day (TOD).
+\end{itemize}
+For each group $g$, let $Q_g$ denote the empirical nonconformity correction
+estimated from the calibration set and let $n_g$ be the number of calibration
+samples in that group. HLC-CQR recursively shrinks the fine-group correction
+toward its parent:
+\begin{equation}
+    Q^*_g = \lambda_g Q_g + (1-\lambda_g) Q^*_{\mathrm{parent}(g)},\quad
+    \lambda_g = \frac{n_g}{n_g+\tau}.
+\end{equation}
+If a group is empty, then $n_g=0$, $\lambda_g=0$, and the correction falls back
+entirely to the parent level. The limit $\tau=0$ recovers naive fine Mondrian
+calibration, whereas $\tau\rightarrow\infty$ degenerates to coarse conformal
+calibration. Our main results use the pre-registered $\tau=20$ setting;
+$\tau=50$ is reported only as a sensitivity result rather than a test-tuned
+headline number.
+
+HLC-CQR is not proposed as a new conformal coverage theorem. It is a
+traffic-structured hierarchical calibration algorithm that addresses a
+practical weakness of naive Mondrian calibration: fine
+node-horizon-load-TOD groups are sharper but become unstable when calibration
+samples are sparse. The final interval remains centered on the frozen mean, so
+HLC-CQR changes uncertainty width but not the point prediction.
+
 \subsection{Gaussian and Global-Widening Baselines}
 To test whether diffusion is necessary, we compare against a
 heteroscedastic Gaussian residual model using the same frozen mean and
@@ -334,7 +380,10 @@ mean; (ii) frozen backbones must be reproduced at literature-level accuracy;
 models; and (v) event-subset results report sample size and paired
 window-level diagnostics, with bootstrap confidence intervals when estimated.
 These checks are designed to avoid impossible point
-improvements, test-selection leakage, and unit-mismatched CRPS values.
+improvements, test-selection leakage, and unit-mismatched CRPS values. For the
+new HLC-CQR main tables, the shrinkage parameter is pre-registered at
+$\tau=20$; $\tau=50$ is retained only as a sensitivity result and not as a
+test-tuned headline setting.
 
 \subsection{Datasets and Backbones}
 We evaluate on PeMS04 and PeMS08. A critical precondition is reproducing or
@@ -348,23 +397,177 @@ tolerance.
 To avoid attributing a strong frozen mean to the residual layer, the final
 comparison uses the same deterministic backbone whenever possible. We include:
 (1) the bare frozen backbone; (2) heteroscedastic Gaussian residuals;
-(3) residual diffusion; (4) split-conformal residual intervals; (5)
-residual-scale calibration, including EAE/CO-style validation
-calibration; and (6) external probabilistic baselines such as CSDI, PriSTI,
-DiffSTG, and SpecSTG when artifacts are available. When a baseline cannot be conditioned on the same
+(3) residual diffusion; (4) split-conformal residual intervals; (5) CQR and
+traffic-conditioned Mondrian variants including CQR-load and
+CQR-load-TOD; (6) the proposed HLC-CQR shrinkage hierarchy; and (7) external
+probabilistic baselines such as CSDI, PriSTI, DiffSTG, and SpecSTG when
+artifacts are available. When a baseline cannot be conditioned on the same
 backbone, we report this limitation explicitly and avoid causal claims about
 method superiority.
 
-\subsection{Main Aggregate Results}
-Table~\ref{tab:trusted_main} summarizes the aggregate evidence used for the
-reliability-oriented claim rather than a diffusion-SOTA claim:
-Gaussian-B attains better full-test Winkler score than CSDI and diffusion at a
-CRPS cost, while PriSTI is dominated in both CRPS and coverage. However, the
-validation gate reveals criterion sensitivity: CRPS, aggregate coverage error,
-and Winkler interval score do not select the same residual generator. We
-therefore report this sensitivity directly and justify Gaussian-B by
-cross-dataset robustness among same-backbone residual generators, rather than
-claiming that a single PeMS08 metric alone proves Gaussian-B.
+\subsection{HLC-CQR: Hierarchical Calibration for Sparse Traffic Regimes}
+Table~\ref{tab:hlc_main} is the new main interval-calibration table. All rows
+use $\alpha=0.10$, validation-calibrated/test-once evaluation, and eight-seed
+means on the frozen STID backbones. The honest positioning is important:
+load-conditioned CQR belongs to the Mondrian or group-conditional conformal
+family, and HLC-CQR is not introduced as a new theorem. The algorithmic novelty
+is the traffic hierarchy plus sample-size-adaptive shrinkage, which targets the
+sparse-group weakness of naive fine calibration. Under full calibration the gain
+over naive load$\times$TOD grouping is modest, but HLC-CQR is the best-Winkler
+method on both datasets while keeping $\mathrm{PICP}\ge 0.890$ and near-best
+TOD/load worst-bin errors.
+
+\begin{table*}[t]
+\centering
+\caption{HLC-CQR main interval-calibration comparison ($8$-seed mean,
+$\alpha=0.10$, validation-calibrated/test-once). Lower MPIW/Winkler and lower
+conditional worst-bin error are better; higher PICP is better.}
+\label{tab:hlc_main}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccccc}
+\toprule
+Dataset & Method & PICP90 & MPIW90 & Winkler90 & TOD worst err. & LOAD worst err. \\
+\midrule
+PeMS08 & conformal & 0.8998 & 63.333 & 96.212 & 0.0867 & 0.0563 \\
+PeMS08 & cqr & 0.8995 & 62.832 & 95.207 & 0.0861 & 0.0554 \\
+PeMS08 & cqr\_load & 0.8978 & 60.541 & 89.592 & 0.0425 & \textbf{0.0080} \\
+PeMS08 & cqr\_load\_tod & 0.8961 & 60.601 & 88.060 & \textbf{0.0149} & 0.0100 \\
+PeMS08 & HLC-CQR & 0.8958 & \textbf{60.193} & \textbf{87.685} & 0.0179 & 0.0102 \\
+\midrule
+PeMS04 & conformal & 0.9001 & 86.133 & 126.932 & 0.0956 & 0.0892 \\
+PeMS04 & cqr & 0.8994 & 85.225 & 126.067 & 0.0957 & 0.0895 \\
+PeMS04 & cqr\_load & 0.8955 & 78.365 & 112.127 & 0.0279 & \textbf{0.0080} \\
+PeMS04 & cqr\_load\_tod & 0.8940 & 78.799 & 111.667 & 0.0164 & 0.0106 \\
+PeMS04 & HLC-CQR & 0.8940 & \textbf{78.352} & \textbf{111.218} & \textbf{0.0160} & 0.0096 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The shrinkage parameter $\tau$ exposes a clean U-shaped trade-off
+(Table~\ref{tab:hlc_tau}). Naive fine Mondrian calibration ($\tau=0$) under-covers,
+and the coarse limit ($\tau=\infty$) degenerates to broad conformal intervals.
+Intermediate shrinkage resolves this trade-off. We report $\tau=20$ as the
+pre-registered main setting; $\tau=50$ is sensitivity only, even though it is
+slightly better on the held-out test tables.
+
+\begin{table}[t]
+\centering
+\caption{$\tau$ ablation for HLC-CQR using PICP90/Winkler90. Intermediate
+shrinkage resolves the fine-group under-coverage of naive Mondrian calibration
+without collapsing back to coarse conformal.}
+\label{tab:hlc_tau}
+\footnotesize
+\begin{tabular}{lcc}
+\toprule
+$\tau$ & PeMS08 PICP/Winkler & PeMS04 PICP/Winkler \\
+\midrule
+0 & 0.8948 / 88.05 & 0.8927 / 111.68 \\
+5 & 0.8946 / 87.86 & 0.8930 / 111.41 \\
+10 & 0.8951 / 87.78 & 0.8934 / 111.32 \\
+20 & 0.8958 / 87.69 & 0.8940 / 111.22 \\
+50 & 0.8974 / 87.59 & 0.8960 / 111.11 \\
+100 & 0.8997 / 87.61 & 0.8995 / 111.12 \\
+200 & 0.9030 / 87.86 & 0.9053 / 111.47 \\
+$\infty$ & 0.8990 / 95.20 & 0.8990 / 126.06 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The main differentiator from naive fine Mondrian appears when calibration data
+are deliberately reduced. Table~\ref{tab:hlc_sample_efficiency} shows that under
+full calibration HLC-CQR is close to the best fine-group baseline, but as the
+available calibration fraction shrinks, the naive load$\times$TOD method loses
+its advantage and can become worse than the coarser load-only baseline. HLC-CQR
+degrades gracefully and remains best, which is the intended resolution of the
+granularity--sample-efficiency trade-off.
+
+\begin{table*}[t]
+\centering
+\caption{Sample-efficiency stress test for HLC-CQR. PeMS08 reports Winkler90
+with full-calibration PICP90 in parentheses for the 100\% row; PeMS04 reports
+the two anchor calibration fractions needed to show the sparse-calibration
+trend.}
+\label{tab:hlc_sample_efficiency}
+\footnotesize
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{llccc}
+\toprule
+Dataset & Calibration frac. & cqr\_load & cqr\_load\_tod & HLC-CQR \\
+\midrule
+PeMS08 & 100\% & 89.59 (.898) & 88.06 (.896) & \textbf{87.69 (.896)} \\
+PeMS08 & 50\% & 89.74 & 88.58 & \textbf{87.95} \\
+PeMS08 & 25\% & 90.13 & 89.51 & \textbf{88.53} \\
+PeMS08 & 10\% & 91.28 & 92.19 & \textbf{89.82} \\
+PeMS08 & 5\% & 93.52 & 95.33 & \textbf{91.70} \\
+\midrule
+PeMS04 & 100\% & 112.13 & 111.67 & \textbf{111.22} \\
+PeMS04 & 5\% & 118.35 & 123.46 & \textbf{116.86} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Because HLC-CQR is an interval-reliability method rather than a full
+distributional model, we compare it to external baselines only on interval
+metrics. Table~\ref{tab:hlc_external_anchor} therefore anchors the discussion on
+Winkler90, not CRPS. HLC-CQR beats the external CSDI interval anchor on both
+datasets with tight confidence intervals, whereas plain conformal does not beat
+CSDI on PeMS04. This matters substantively: the crossing comes from hierarchical
+load/TOD conditioning rather than from conformalization alone.
+
+\begin{table*}[t]
+\centering
+\caption{External CSDI interval anchor using Winkler90 only. Negative
+$\Delta$ means the listed method has lower Winkler90 than CSDI and is therefore
+better on interval score.}
+\label{tab:hlc_external_anchor}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llcccc}
+\toprule
+Dataset & Method & CSDI mean W90 & $\Delta$ vs. CSDI & 95\% CI & Verdict \\
+\midrule
+PeMS08 & HLC-CQR & 97.11 & -9.375 & [-9.803, -8.951] & BETTER ($p\approx 0$) \\
+PeMS08 & cqr\_load & 97.11 & -7.522 & [-7.957, -7.095] & BETTER ($p<10^{-197}$) \\
+PeMS08 & conformal & 97.11 & -0.886 & [-1.401, -0.385] & TIE/weak ($p=0.21$) \\
+\midrule
+PeMS04 & HLC-CQR & 120.44 & -9.177 & [-9.549, -8.818] & BETTER ($p\approx 0$) \\
+PeMS04 & cqr\_load & 120.44 & -8.267 & [-8.646, -7.905] & BETTER ($p<10^{-263}$) \\
+PeMS04 & conformal & 120.44 & +6.525 & [+5.897, +7.139] & WORSE ($p<10^{-30}$) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:hlc_portability} keeps the portability claim honest. The
+full eight-seed evidence is on the STID frozen mean, and we add only a one-seed
+PDFormer-d6 diagnostic. The same ordering still appears on that additional
+graph-transformer backbone, but we do not over-claim this as a full
+three-backbone proof.
+
+\begin{table}[t]
+\centering
+\caption{Cross-backbone portability for the interval-calibration ordering.
+STID results use eight seeds; PDFormer-d6 is a one-seed diagnostic only.}
+\label{tab:hlc_portability}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}llccccc@{}}
+\toprule
+Dataset & Backbone & Seeds & $\mu$ MAE & conformal W & cqr\_load W & HLC W / PICP \\
+\midrule
+PeMS08 & STID & 8 & 14.166 & 96.212 & 89.592 & \textbf{87.685} / 0.8958 \\
+PeMS04 & STID & 8 & 18.668 & 126.932 & 112.127 & \textbf{111.218} / 0.8940 \\
+PeMS08 & PDFormer-d6 & 1 & 15.277 & 101.417 & 95.142 & \textbf{93.500} / 0.8937 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Legacy Residual-Generator Diagnostics}
+The following Gaussian-B and diffusion sections are retained as background
+diagnostics from the earlier draft. They still document generator fragility,
+incident/drop failure modes, and backbone-attribution caveats, but they are no
+longer the paper's main method claim. Table~\ref{tab:trusted_main} summarizes
+that legacy evidence.
 
 \begin{table*}[t]
 \centering
@@ -401,7 +604,7 @@ PeMS04 & Diffusion scale 3.2 sem. & 19.351 & 31.372 & 15.025 & 0.842 & 79.849 & 
 \end{tabular}
 \end{table*}
 
-The aggregate results sharpen the main claim. Gaussian-B does not dominate CSDI
+The aggregate results sharpen the legacy diagnostic. Gaussian-B does not dominate CSDI
 in CRPS, but CSDI severely under-covers at the nominal 90\% level. Conversely,
 Gaussian-B has substantially better coverage and lower interval score in the
 unified PeMS08 comparison. Against PriSTI, Gaussian-B is better in both CRPS and
@@ -709,24 +912,24 @@ Spike & PriSTI & 48 & 1.000 & 0.305 & 0.691 & 20.715 \\
 \end{table}
 
 \subsection{Current Innovation and Experimental Scope}
-The current paper should be framed around four traffic-specific innovations
-rather than a generic residual-diffusion claim. First, it gives a
-same-backbone, mean-preserving protocol in which the probabilistic residual
-layer cannot change point MAE/RMSE, enabling fair isolation of calibration
-quality. Second, it contributes a validation-honest generator-selection gate
-that explicitly reports scoring-rule sensitivity. Diffusion is not assumed to
-be superior, and the paper does not choose the criterion most favorable to any
-method after inspecting test performance; instead, it asks which residual
-generator is robust enough across datasets, criteria, and seeds. The current
-evidence favors closed-form Gaussian-B as the deployable residual-calibration
-layer, while retaining CSDI/PriSTI as external baselines rather than
-same-backbone residual generators. Third, it contributes an incident/drop
-reliability protocol with paired window-level diagnostics, per-horizon
-reliability, and explicit validation-only calibration. Fourth, it introduces a
-mean-vs-dispersion diagnostic that explains when coverage failure is caused by
-frozen-mean regime shift and when variance calibration can plausibly help.
-Semantic conditioning is currently a negative or optional diagnostic factor, not
-a headline contribution.
+The current paper should be framed around HLC-CQR plus four supporting
+traffic-specific ingredients rather than around a generic residual-diffusion
+claim. First, it gives a same-backbone, mean-preserving protocol in which the
+uncertainty layer cannot change point MAE/RMSE, enabling fair isolation of
+interval calibration quality. Second, it contributes HLC-CQR itself: a
+traffic-structured hierarchical calibration algorithm that converts
+load-conditioned CQR from a traffic-specific Mondrian instantiation into a
+sample-size-adaptive hierarchy over
+global, horizon, node$\times$horizon,
+node$\times$horizon$\times$load, and
+node$\times$horizon$\times$load$\times$TOD groups. Third, it shows by direct
+$\tau$ and calibration-downsampling experiments that the distinctive value of
+HLC-CQR is sparse-calibration robustness rather than a dramatic full-data gain
+over naive fine grouping. Fourth, it retains incident/drop reliability and
+mean-vs-dispersion diagnostics to delimit the method's scope: HLC-CQR improves
+interval reliability and sharpness, but it does not solve mean-level surprise
+under severe drops. Legacy Gaussian-B, diffusion, and semantic results remain
+useful background diagnostics, not headline contributions.
 
 \subsection{Split-Conformal Reliability Audit}
 We also run a split-conformal reliability audit on validation residuals at
@@ -971,50 +1174,47 @@ improvement and are therefore reported as a negative finding.
 
 \section{Conclusion}
 
-This paper is repositioned as a diagnostic study of residual probabilistic
-traffic forecasting under incident regimes. Because recent work such as CARD, RDIT, FALDA/DMRR, and diffusion residual
-modeling already establishes much of the generic residual-diffusion and
-residual-calibration paradigm, our contribution
-must be judged by traffic-specific evidence: same-backbone fairness,
-validation-honest calibration, incident/drop reliability, and root-cause
-analysis. The evidence does not support a simple aggregate-CRPS SOTA
-claim. On the formal PeMS08 unified full-test comparison, both CSDI and
-diffusion have lower CRPS than Gaussian-B, but they under-cover substantially,
-whereas Gaussian-B has better coverage and lower Winkler score. On PeMS04,
-however, the residual-generator ambiguity disappears: Gaussian-B beats diffusion
-under CRPS, coverage, and Winkler across all three seeds while preserving the
-same point MAE/RMSE.
+This paper is repositioned around HLC-CQR rather than around Gaussian-B or
+residual diffusion. The main contribution is a traffic-structured hierarchical
+calibration algorithm for frozen-backbone traffic uncertainty: HLC-CQR turns
+load-conditioned CQR from a traffic-specific Mondrian instantiation into a
+hierarchy with sample-size-adaptive shrinkage. We do not claim a new conformal
+coverage theorem. The claim is algorithmic and empirical: fine
+node$\times$horizon$\times$load$\times$TOD calibration can be sharper, but it is
+sample-inefficient when calibration groups are sparse; HLC-CQR resolves this
+trade-off by shrinking unstable fine-group corrections toward reliable parents.
 
-A backbone-portability audit sharpens this conclusion rather than overturning it.
-When the PeMS08 frozen mean is swapped from PDFormer to a stronger same-setting
-STID backbone (test MAE $14.151$ versus $15.249$), the identical mean-preserving
-framework attains aggregate CRPS significantly below a properly sampled CSDI
-($10.70$ versus an $S=100$ five-seed anchor of $11.031$; paired
-$\Delta\text{CRPS}=-0.26$ even against CSDI's strongest seed, $90\%$ CI excluding
-zero) while exactly preserving the backbone's point accuracy. However, a
-same-backbone attribution on that stronger mean shows the crossing is
-granularity-driven rather than residual-model-driven: a trivial CRPS-optimal
-global Gaussian reaches only $11.230$ and does \emph{not} cross the $S=100$ CSDI
-anchor, whereas a parameter-free per-(node,horizon) conformal arm ties the
-learned head ($10.719$ versus $10.704$). Thus a lower aggregate CRPS than CSDI is
-reachable by strengthening the frozen mean and using per-(node,horizon)
-dispersion, but it is not evidence for a novel residual model;
-it reinforces that aggregate CRPS alone is an insufficient basis for a
-residual-model SOTA claim.
+The evidence supports this interval-calibration claim on both PeMS08 and
+PeMS04. In the main eight-seed tables, HLC-CQR obtains the best Winkler90 score
+on both datasets while keeping near-nominal coverage and near-best conditional
+reliability on TOD and load diagnostics. The key advantage is not a dramatic
+full-calibration gain over naive load$\times$TOD grouping---that gain is
+modest---but robust behavior when calibration data become scarce. A
+pre-registered $\tau=20$ setting sits near the bottom of a clean U-shaped
+trade-off: $\tau=0$ under-covers like naive fine Mondrian calibration, and
+$\tau=\infty$ collapses back to coarse conformal intervals. Under downsampled
+calibration, naive fine grouping loses its advantage and can become worse than
+coarser alternatives, whereas HLC-CQR degrades gracefully and remains best.
 
-The final claim is therefore robustness- and portability-oriented. We do not
-claim a single probabilistic model that wins under every scoring rule or against
-every external baseline. Instead, among same-backbone residual generators,
-closed-form Gaussian-B is the deployable calibration layer because it avoids the
-cross-criterion, cross-setting, and cross-dataset fragility observed for
-diffusion: diffusion is closest to nominal coverage on the PeMS08 recalibrated
-gate subset, but under-covers on PeMS08 full test and collapses on PeMS04. We
-separate same-backbone residual comparisons from external-number comparisons,
-report external generative baselines as distinct model families, present the
-framework as backbone-portable while attributing aggregate-CRPS competitiveness
-honestly to the frozen mean rather than the residual model, and treat
-the deterministic-backbone reproduction gap as an explicit limitation that does
-not alter the same-frozen-mean calibration comparisons.
+The external-baseline comparison must also be stated honestly. HLC-CQR is an
+interval reliability and sharpness method; it is not claimed to dominate CSDI on
+full-distribution metrics such as CRPS. What we can claim is narrower and
+stronger: on interval metrics, HLC-CQR beats the external CSDI Winkler anchor on
+both datasets with tight paired confidence intervals, while plain conformal does
+not beat CSDI on PeMS04. This shows that the crossing comes from hierarchical
+load/TOD conditioning rather than from conformalization alone. A one-seed
+PDFormer diagnostic preserves the same ordering, which supports portability but
+does not by itself prove three-backbone generality.
+
+Legacy Gaussian-B, diffusion, incident/drop, and backbone-attribution analyses
+remain valuable background diagnostics. They explain why aggregate CRPS alone is
+an insufficient deployment metric, why interval claims must be validation-honest,
+and why severe drop failures remain mean-level surprises that variance-only
+calibration cannot solve. The final conclusion is therefore reliability- and
+sample-efficiency-oriented: HLC-CQR is the strongest interval-calibration method
+in this study, and its distinctive value is turning load-conditioned CQR into a
+traffic-structured hierarchical calibration algorithm that remains useful when
+the finest traffic groups do not have enough calibration data.
 
 \bibliographystyle{IEEEtran}
 \bibliography{prompt-stdiff-refs}

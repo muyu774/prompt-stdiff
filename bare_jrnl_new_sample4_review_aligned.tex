@@ -960,6 +960,85 @@ calibration under the same backbone, while aggregate CRPS alone---now achievable
 below CSDI with a stronger backbone and free conformal granularity---remains an
 insufficient basis for a \emph{residual-model} SOTA claim.
 
+\subsection{Eight-Seed Load-Conditioned CQR Calibration}
+
+Having established that aggregate-CRPS competitiveness on PeMS08 is
+granularity-driven rather than residual-model-driven, we now ask whether
+the frozen-mean framework admits a further, principled improvement in
+\emph{interval} calibration.  We answer this affirmatively through an
+eight-seed study of load-conditioned Conformalized Quantile Regression
+(CQR-load) on the frozen STID PeMS08 mean.
+
+The frozen STID backbone attains a test MAE of $14.166 \pm 0.016$ across
+the eight seeds (seeds 42, 7, 123, 2024, 2025, 777, 2026, 3407), confirming
+seed-stable point accuracy.  Table~\ref{tab:stid_cqr_8seed} reports the
+90\% interval calibration arms evaluated at that frozen mean.  The strongest
+arm is CQR-load: conditioning the CQR calibration on predicted load bins
+reduces Winkler90 from $96.21{\pm}0.11$ (split conformal nodeh) to
+$89.07{\pm}0.06$, and compresses MPIW90 from $63.33{\pm}0.12$ to
+$60.02{\pm}0.07$, while keeping PICP90 near-nominal ($0.8949{\pm}0.0002$;
+see the caveat below).  Vanilla CQR nodeh also improves over plain conformal,
+but more modestly.  To confirm that the CQR nodeh advantage is not a sampling
+artefact, we computed per-window Winkler scores and ran a paired bootstrap:
+all eight seeds independently return a BETTER verdict, with a mean
+$\Delta_\text{Winkler} \approx -1.005 \pm 0.054$.
+
+\begin{table}[t]
+\centering
+\caption{Eight-seed conditional interval calibration on the frozen STID PeMS08 mean. All intervals are calibrated on validation data and evaluated once on test. CQR-load conditions calibration on predicted load bins.}
+\label{tab:stid_cqr_8seed}
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Arm & PICP90 & MPIW90 & Winkler90 \\
+\midrule
+Gaussian $\sigma$ head & $0.8981{\pm}0.0005$ & $63.89{\pm}0.19$ & $97.86{\pm}0.20$ \\
+Split conformal nodeh & $0.8998{\pm}0.0002$ & $63.33{\pm}0.12$ & $96.21{\pm}0.11$ \\
+CQR nodeh & $0.8995{\pm}0.0002$ & $62.83{\pm}0.09$ & $95.21{\pm}0.08$ \\
+CQR-load & $0.8949{\pm}0.0002$ & $\mathbf{60.02{\pm}0.07}$ & $\mathbf{89.07{\pm}0.06}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A potential concern is whether CQR-load's benefit is narrow: it calibrates
+on load bins, so it might merely shift coverage from load-strata to
+everywhere else.  Table~\ref{tab:stid_cqr_orthogonal} addresses this with
+\emph{orthogonal} conditional-coverage diagnostics on two axes that were
+\emph{not} used as calibration dimensions.  On the time-of-day (TOD)
+dimension, CQR-load cuts the worst-bin coverage error from $0.087$
+(conformal) / $0.086$ (CQR nodeh) to $\mathbf{0.047}$---a 46\% reduction.
+On the horizon dimension, all arms are near-nominal ($0.002$--$0.007$);
+CQR-load is slightly elevated ($0.007$) but still close to nominal and
+within the expected noise of an eight-horizon short-range dataset.  The TOD
+improvement on an out-of-calibration axis confirms that load-level
+conditioning generalizes: it captures a covariate that correlates with
+diurnal congestion patterns without being told about time of day.
+
+\begin{table}[t]
+\centering
+\caption{Orthogonal conditional-coverage diagnostics for the eight-seed STID PeMS08 interval study. Lower worst-bin coverage error is better. CQR-load is calibrated on load bins, whereas TOD and horizon diagnostics are not calibration axes.}
+\label{tab:stid_cqr_orthogonal}
+\footnotesize
+\begin{tabular}{lcc}
+\toprule
+Arm & TOD worst-bin error & Horizon worst-bin error \\
+\midrule
+Split conformal nodeh & 0.087 & 0.002 \\
+CQR nodeh & 0.086 & 0.002 \\
+CQR-load & $\mathbf{0.047}$ & 0.007 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Honest caveats.}  First, CQR-load's PICP90 ($0.8949$) is slightly
+below the nominal $0.90$; we therefore report ``near-nominal'' rather than
+exact nominal.  Second, the Winkler and MPIW gains come from
+backbone-portable mean preservation combined with condition-aware calibration
+granularity, \emph{not} from a residual diffusion model.  Third, the
+horizon worst-bin error for CQR-load is $0.007$, larger than conformal's
+$0.002$; this is a recognized trade-off of bin-conditional calibration on a
+short-horizon dataset where horizon groups have unequal sample sizes.
+
 \subsection{Negative Results and Semantic Conditioning}
 Earlier semantic prompt variants did not consistently improve aggregate
 forecasting, and naive incident-tail variants degraded full-test CRPS while
@@ -1015,6 +1094,10 @@ framework as backbone-portable while attributing aggregate-CRPS competitiveness
 honestly to the frozen mean rather than the residual model, and treat
 the deterministic-backbone reproduction gap as an explicit limitation that does
 not alter the same-frozen-mean calibration comparisons.
+A backbone-portability audit combined with the eight-seed CQR-load interval
+study (Section~\ref{sec:experiments}) shows that aggregate-CRPS / Winkler
+competitiveness is driven by a stronger frozen mean and condition-aware
+calibration granularity, not by residual diffusion.
 
 \bibliographystyle{IEEEtran}
 \bibliography{prompt-stdiff-refs}

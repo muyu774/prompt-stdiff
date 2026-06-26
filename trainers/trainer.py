@@ -92,6 +92,13 @@ class Trainer:
         self.loss_x0_type = str(tcfg.get("loss_x0_type", "l1"))
         self.loss_residual_scale_weight = float(tcfg.get("loss_residual_scale_weight", 0.0))
         self.loss_residual_scale_type = str(tcfg.get("loss_residual_scale_type", "gaussian"))
+        self.use_incident_mean_correction = bool(
+            getattr(self.model, "use_incident_mean_correction", False)
+        )
+        self.loss_regime_detect_weight = float(tcfg.get("loss_regime_detect_weight", 0.0))
+        self.loss_mean_correction_weight = float(tcfg.get("loss_mean_correction_weight", 0.0))
+        self.loss_correction_sparsity_weight = float(tcfg.get("loss_correction_sparsity_weight", 0.0))
+        self.incident_regime_threshold = float(tcfg.get("incident_regime_threshold", 2.0))
         self.predict_residual = bool(config.get("model", {}).get("predict_residual", False))
         self.use_absolute_mean_predictor = bool(getattr(self.model, "uses_absolute_mean_predictor", False))
         self.use_mean_head = (
@@ -390,6 +397,34 @@ class Trainer:
                     else:
                         raise ValueError(f"Unsupported mean_loss_type: {self.mean_loss_type}")
                     loss = loss + self.mean_loss_weight * mean_loss
+
+                if (
+                    self.use_incident_mean_correction
+                    and mean_pred is not None
+                    and (
+                        self.loss_regime_detect_weight > 0.0
+                        or self.loss_mean_correction_weight > 0.0
+                        or self.loss_correction_sparsity_weight > 0.0
+                    )
+                ):
+                    # Mean-level residual the correction is meant to repair. For an
+                    # absolute mean predictor mean_pred is the future forecast; for a
+                    # residual mean head it predicts the residual target directly. In
+                    # both cases x0_true - mean_pred is the mean-level surprise.
+                    residual_target = x0_true - mean_pred
+                    corr_losses = self.model.incident_correction_losses(
+                        residual_target=residual_target,
+                        x_his=x_his,
+                        z_sem=z_sem_batch,
+                        a_phy=self.a_phy,
+                        regime_threshold=self.incident_regime_threshold,
+                    )
+                    loss = (
+                        loss
+                        + self.loss_regime_detect_weight * corr_losses["detection"]
+                        + self.loss_mean_correction_weight * corr_losses["regression"]
+                        + self.loss_correction_sparsity_weight * corr_losses["sparsity"]
+                    )
 
             if self.amp_scaler.is_enabled():
                 self.amp_scaler.scale(loss).backward()

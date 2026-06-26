@@ -8,6 +8,15 @@ import torch
 import torch.nn as nn
 
 from models.denoiser import EpsilonTheta
+from models.incident_correction import (
+    GraphMeanPropagator,
+    MeanCorrectionHead,
+    RegimeShiftHead,
+    correction_regression_loss,
+    detection_loss,
+    regime_shift_labels,
+    sparsity_loss,
+)
 from models.mean_head import TrafficMeanHead
 from models.mean_predictor import MeanPredictor, ResidualStandardizer
 
@@ -205,6 +214,12 @@ class PromptSTDiff(nn.Module):
         incident_tail_max_scale: float = 4.0,
         incident_tail_use_semantic: bool = True,
         incident_tail_df: float = 3.0,
+        use_incident_mean_correction: bool = False,
+        incident_correction_hidden_dim: int | None = None,
+        incident_correction_use_semantic: bool = True,
+        incident_correction_max_shift: float = 4.0,
+        incident_correction_graph_hops: int = 2,
+        incident_correction_gate_bias: float = -4.0,
     ) -> None:
         super().__init__()
         self.mean_predictor = mean_predictor
@@ -309,6 +324,35 @@ class PromptSTDiff(nn.Module):
             if self.use_incident_tail_scale
             else None
         )
+        self.use_incident_mean_correction = bool(use_incident_mean_correction)
+        # Runtime switch so a single trained model can be evaluated in the strict
+        # mean-preserving mode (gate forced off) or the incident-corrected mode.
+        self.apply_incident_correction = bool(use_incident_mean_correction)
+        if self.use_incident_mean_correction:
+            corr_hidden = int(incident_correction_hidden_dim or hetero_scale_hidden_dim or hidden_dim)
+            self.regime_shift_head = RegimeShiftHead(
+                input_dim=input_dim,
+                sem_dim=sem_dim,
+                hidden_dim=corr_hidden,
+                horizon_steps=horizon_steps,
+                use_semantic=bool(incident_correction_use_semantic),
+                init_gate_bias=float(incident_correction_gate_bias),
+            )
+            self.mean_correction_head = MeanCorrectionHead(
+                input_dim=input_dim,
+                sem_dim=sem_dim,
+                hidden_dim=corr_hidden,
+                horizon_steps=horizon_steps,
+                use_semantic=bool(incident_correction_use_semantic),
+                max_shift=float(incident_correction_max_shift),
+            )
+            self.mean_correction_propagator = GraphMeanPropagator(
+                num_hops=int(incident_correction_graph_hops),
+            )
+        else:
+            self.regime_shift_head = None
+            self.mean_correction_head = None
+            self.mean_correction_propagator = None
 
     def forward(
         self,
@@ -492,3 +536,119 @@ class PromptSTDiff(nn.Module):
         if self.residual_sample_scale != 1.0:
             out = out * self.residual_sample_scale
         return out
+
+    # ------------------------------------------------------------------
+    # Incident-gated residual mean-correction (diagnose -> repair).
+    # ------------------------------------------------------------------
+    def set_incident_correction_enabled(self, enabled: bool) -> None:
+        """Toggle the mean-correction at inference time.
+
+        Setting this to ``False`` recovers the strict mean-preserving scaffold
+        (gate forced off) used for the controlled diffusion-vs-Gaussian
+        comparison, even for a model that was trained with the correction heads.
+        """
+        if enabled and not self.use_incident_mean_correction:
+            raise ValueError("Model was not built with use_incident_mean_correction=true")
+        self.apply_incident_correction = bool(enabled)
+
+    def predict_regime_gate(self, x_his: torch.Tensor, z_sem: torch.Tensor) -> torch.Tensor:
+        """Predict the regime-shift gate ``g in [0, 1]`` ``[B, H, N, F]``.
+
+        Returns zeros when the correction is disabled, i.e. no regime is flagged.
+        """
+        if self.regime_shift_head is None:
+            b = x_his.shape[0]
+            h = self.epsilon_theta.horizon_steps
+            n = x_his.shape[2]
+            f = x_his.shape[3]
+            return torch.zeros((b, h, n, f), dtype=x_his.dtype, device=x_his.device)
+        return self.regime_shift_head(x_his=x_his, z_sem=z_sem)
+
+    def predict_mean_correction(
+        self,
+        x_his: torch.Tensor,
+        z_sem: torch.Tensor,
+        a_phy: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict the gated, graph-propagated mean shift ``[B, H, N, F]``.
+
+        The shift lives in the same residual space as the frozen mean predictor's
+        target. It is zero when the correction is disabled, identity-by-default
+        otherwise (sparse gate + identity-initialized propagator).
+        """
+        if (
+            self.regime_shift_head is None
+            or self.mean_correction_head is None
+            or self.mean_correction_propagator is None
+        ):
+            b = x_his.shape[0]
+            h = self.epsilon_theta.horizon_steps
+            n = x_his.shape[2]
+            f = x_his.shape[3]
+            return torch.zeros((b, h, n, f), dtype=x_his.dtype, device=x_his.device)
+        gate = self.regime_shift_head(x_his=x_his, z_sem=z_sem)
+        delta = self.mean_correction_head(x_his=x_his, z_sem=z_sem)
+        gated_shift = gate * delta
+        return self.mean_correction_propagator(shift=gated_shift, a_phy=a_phy)
+
+    def apply_mean_correction(
+        self,
+        ensemble: torch.Tensor,
+        x_his: torch.Tensor,
+        z_sem: torch.Tensor,
+        a_phy: torch.Tensor,
+    ) -> torch.Tensor:
+        """Add the gated mean correction to every ensemble member.
+
+        The same shift is broadcast across the sample dimension, so the predictive
+        *center* moves while the residual *spread* is untouched. This is the
+        mechanism that recovers conditional coverage on mean-level (``rho >> 1``)
+        incident drops, which variance-only calibration cannot fix.
+        """
+        if not self.apply_incident_correction or self.mean_correction_head is None:
+            return ensemble
+        shift = self.predict_mean_correction(x_his=x_his, z_sem=z_sem, a_phy=a_phy)
+        if ensemble.dim() == 5:
+            shift = shift.unsqueeze(0)
+        return ensemble + shift
+
+    def incident_correction_losses(
+        self,
+        residual_target: torch.Tensor,
+        x_his: torch.Tensor,
+        z_sem: torch.Tensor,
+        a_phy: torch.Tensor,
+        regime_threshold: float = 2.0,
+    ) -> Dict[str, torch.Tensor]:
+        """Compute detection, regression, and sparsity losses for the correction.
+
+        Args:
+            residual_target: Mean-level residual ``y - mu_hat`` in normalized
+                forecasting space ``[B, H, N, F]`` (the part the correction repairs).
+            x_his: History tensor ``[B, T, N, F]`` (detector/correction input).
+            z_sem: Semantic embeddings ``[N, D]`` or ``[B, N, D]``.
+            a_phy: Physical adjacency ``[N, N]`` or ``[B, N, N]``.
+            regime_threshold: Standardized-residual magnitude above which a
+                position is labeled an incident/drop regime.
+
+        Returns:
+            Dict with ``detection``, ``regression``, and ``sparsity`` scalar losses.
+        """
+        if self.regime_shift_head is None or self.mean_correction_head is None:
+            raise ValueError("Model was not built with use_incident_mean_correction=true")
+        target = residual_target.detach()
+        target_std = self.standardize_residual(target).detach()
+        labels = regime_shift_labels(target_std, threshold=regime_threshold)
+
+        gate = self.regime_shift_head(x_his=x_his, z_sem=z_sem)
+        delta = self.mean_correction_head(x_his=x_his, z_sem=z_sem)
+        gated_shift = self.mean_correction_propagator(shift=gate * delta, a_phy=a_phy)
+        return {
+            "detection": detection_loss(gate=gate, labels=labels),
+            "regression": correction_regression_loss(
+                gated_shift=gated_shift,
+                residual_target=target,
+                labels=labels,
+            ),
+            "sparsity": sparsity_loss(gated_shift=gated_shift, labels=labels),
+        }

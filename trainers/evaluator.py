@@ -119,6 +119,12 @@ def evaluate(
             residual = model.unstandardize_residual(ensemble)
             residual = model.calibrate_residual_samples(residual, x_his=x_his, z_sem=z_sem_batch)
             ensemble = residual + mean_pred.unsqueeze(0)
+            ensemble = model.apply_mean_correction(
+                ensemble,
+                x_his=x_his,
+                z_sem=z_sem_batch,
+                a_phy=a_phy,
+            )
         if predict_residual and not bool(getattr(model, "uses_absolute_mean_predictor", False)):
             # ASSUMPTION: residual parameterization predicts deviations from the
             # last observed normalized value; add it back before inverse scaling.

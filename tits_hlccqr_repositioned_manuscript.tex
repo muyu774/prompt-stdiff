@@ -1,0 +1,323 @@
+\documentclass[letterpaper,journal]{IEEEtran}
+
+\usepackage{amsmath,amsfonts}
+\usepackage{array}
+\usepackage[caption=false,font=normalsize,labelfont=sf,textfont=sf]{subfig}
+\usepackage{textcomp}
+\usepackage{stfloats}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{multirow}
+\usepackage{booktabs}
+
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+\newcommand{\hlc}{HLC-CQR}
+\newcommand{\picp}{PICP$_{90}$}
+\newcommand{\mpiw}{MPIW$_{90}$}
+\newcommand{\wink}{Winkler$_{90}$}
+
+\begin{document}
+
+\title{Mean-Preserving Hierarchical Conformal Residual Calibration for Reliable Traffic Forecasting}
+
+\author{Ziyu~Wang, Kaijie~Xu, and Lin~Qiu%
+\thanks{Ziyu Wang, Kaijie Xu, and Lin Qiu are with Zhejiang University, Hangzhou, Zhejiang, China.}%
+\thanks{E-mail: yan.24@intl.zju.edu.cn; Kaijie.23@intl.zju.edu.cn; linqiu@intl.zju.edu.cn.}%
+\thanks{The authors contributed equally to this work.}}
+
+\markboth{IEEE Transactions on Intelligent Transportation Systems, Manuscript Draft}%
+{Wang \MakeLowercase{\textit{et al.}}: Mean-Preserving Hierarchical Conformal Residual Calibration}
+
+\maketitle
+
+\begin{abstract}
+Reliable traffic forecasting requires prediction intervals that are both calibrated and sharp, especially when forecasts are used for operational decisions under congestion, demand surges, and incident-driven regime shifts. Existing probabilistic traffic models are often evaluated by aggregate distributional scores, but these averages may hide systematic under-coverage in safety-critical regimes. This paper proposes \emph{Hierarchical Load-Conditioned Conformalized Quantile Regression} (\hlc), a deployable post-hoc calibration layer for probabilistic traffic forecasting. A strong deterministic spatio-temporal backbone is frozen and used as the mean forecast; \hlc\ then calibrates only the residual uncertainty, preserving the backbone's point MAE/RMSE by construction. The method organizes residual conformal corrections along a traffic-structured hierarchy---global, horizon, node, predicted-load bin, and time-of-day bin---and applies sample-size-adaptive shrinkage from fine cells toward their parents. This design retains the sharpness of fine-grained group-conditional calibration when calibration data are sufficient, while avoiding the sparse-cell instability of naive Mondrian conformal calibration. Experiments on PeMS08 and PeMS04 show that \hlc\ achieves the best interval score at near-nominal coverage among conformal residual calibration baselines, improves window-level Winkler score over an external CSDI interval anchor on matched windows, and remains robust when the calibration set is reduced to 5\%. Incident-regime diagnostics further show that aggregate metrics can obscure severe coverage failures on rare traffic drops. The results position \hlc\ as a simple, interpretable, and inference-efficient calibration layer for reliable probabilistic traffic forecasting, rather than as another heavy generative forecaster.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Probabilistic traffic forecasting, conformal prediction, uncertainty calibration, residual calibration, prediction intervals, intelligent transportation systems.
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Traffic forecasting is a core component of intelligent transportation systems (ITS). Modern graph neural networks, recurrent graph models, and Transformer-based forecasters have achieved strong deterministic performance by modeling spatial dependencies and temporal dynamics in sensor networks. However, point forecasts alone are insufficient for traffic operations: route guidance, congestion control, incident response, and risk-aware planning require uncertainty estimates that are reliable under both ordinary and disrupted regimes.
+
+Probabilistic traffic forecasting has therefore attracted increasing attention. Diffusion-based models, residual distribution learners, and conformal prediction methods can all provide predictive distributions or intervals. Yet a practical gap remains. Many studies emphasize aggregate scores such as the continuous ranked probability score (CRPS) or a single prediction interval coverage probability (PICP). Such aggregate metrics are useful but incomplete. A model may obtain a competitive average CRPS while severely under-covering rare incident-driven traffic drops, and a method may obtain high PICP simply by producing excessively wide intervals. For T-ITS deployment, the relevant objective is not only probabilistic accuracy, but the \emph{calibration--sharpness trade-off}: prediction intervals should approach nominal coverage while remaining as narrow as possible and reliable across traffic regimes.
+
+This paper takes a calibration-centered view of probabilistic traffic forecasting. We use a strong deterministic traffic forecaster as a frozen mean predictor and calibrate residual uncertainty around this mean. This mean-preserving design has two advantages. First, point accuracy is inherited from the backbone and is not degraded by stochastic sampling or post-hoc calibration. Second, uncertainty methods can be compared under the same deterministic mean, avoiding the common confound in which a probabilistic model appears better because it uses a stronger point predictor.
+
+The central contribution is \hlc, a hierarchical load-conditioned conformal residual calibration layer. Standard split conformal calibration provides marginal coverage but is often too coarse for traffic networks, where residual uncertainty varies by horizon, road segment, predicted load, and time of day. Naive group-conditional or Mondrian conformal calibration can exploit such structure, but fine cells may contain few calibration points, causing unstable quantiles and poor sample efficiency. \hlc\ resolves this granularity--sample-efficiency trade-off by arranging calibration cells in a traffic-structured hierarchy and shrinking each fine-cell correction toward its parent according to the available calibration count. Empty or sparse cells automatically fall back to coarser reliable estimates, while dense cells use fine-grained traffic conditioning.
+
+The paper is positioned as a reliable calibration algorithm for traffic forecasting rather than another diffusion architecture. We keep diffusion residuals, heteroscedastic Gaussian residuals, and semantic conditioning as baselines or diagnostic components, but the deployable method is \hlc. Experiments on PeMS08 and PeMS04 show that \hlc\ achieves the best Winkler interval score at near-nominal coverage among residual conformal calibration baselines, retains its advantage under calibration-data scarcity, and improves interval score over an external CSDI anchor on matched windows. We also provide incident-regime reliability diagnostics showing why aggregate probabilistic metrics alone are insufficient for ITS deployment.
+
+The contributions are summarized as follows:
+\begin{itemize}
+    \item We formulate probabilistic traffic forecasting as \emph{mean-preserving residual calibration}: a frozen deterministic backbone supplies the point forecast, and the uncertainty layer calibrates residual intervals without changing MAE/RMSE.
+    \item We propose \hlc, a hierarchical load-conditioned conformal calibration algorithm that combines traffic-structured conditioning (global $\rightarrow$ horizon $\rightarrow$ node $\rightarrow$ predicted-load $\rightarrow$ time-of-day) with sample-size-adaptive shrinkage.
+    \item We show that \hlc\ achieves a strong calibration--sharpness trade-off on PeMS08 and PeMS04, obtaining the best Winkler score at near-nominal coverage among conformal residual calibration baselines and remaining robust as calibration data are reduced to 5\%.
+    \item We compare \hlc\ with external generative probabilistic baselines on interval scores using matched test windows, while keeping CRPS-based distributional comparisons separate to avoid mixing interval calibration and sampling-based objectives.
+    \item We introduce incident-regime reliability diagnostics, including event-conditioned coverage and a mean-vs-dispersion root-cause ratio, to reveal failures hidden by aggregate metrics and to distinguish variance miscalibration from frozen-mean regime surprises.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Deterministic Spatio-Temporal Traffic Forecasting}
+Traffic forecasting has evolved from classical statistical models to deep spatio-temporal learning over sensor graphs. Graph convolutional and recurrent models such as STGCN, DCRNN, Graph WaveNet, and AGCRN model road-network dependencies and temporal dynamics \cite{yu2018stgcn,li2018dcrnn,wu2019graphwavenet,bai2020agcrn}. Attention-based and Transformer-style methods such as GMAN, PDFormer, STAEformer, and related models further improve long-horizon deterministic prediction \cite{zheng2020gman,jiang2023pdformer,liu2023staeformer}. These models are strong point forecasters. In this work, they are treated as frozen mean predictors so that uncertainty calibration can be studied independently of point-prediction improvements.
+
+\subsection{Probabilistic and Diffusion-Based Traffic Forecasting}
+Probabilistic forecasting extends point prediction to predictive distributions. CSDI, TimeGrad, PriSTI, DiffSTG, and SpecSTG represent diffusion or generative approaches for multivariate time series and spatio-temporal traffic graphs \cite{tashiro2021csdi,rasul2021timegrad,liu2023pristi,wen2023diffstg,lin2024specstg}. A related line of residual probabilistic forecasting decouples deterministic mean estimation from residual uncertainty modeling \cite{han2022card,lai2025rdit,wang2025falda,qi2026diffusionresidual}. These models can improve distributional scores, but they are typically heavier than post-hoc calibration layers and can entangle mean quality with uncertainty quality. Our goal is complementary: given a strong frozen mean, we ask how to obtain calibrated and sharp traffic intervals with a simple deployable residual layer.
+
+\subsection{Conformal Prediction and Traffic Calibration}
+Conformal prediction provides distribution-free marginal coverage under exchangeability, making it attractive for post-hoc uncertainty calibration. Split conformal intervals are simple and robust, but marginal coverage can be too coarse for heterogeneous traffic networks. Group-conditional or Mondrian conformal prediction can condition on traffic structure, but fine partitions can suffer from sparse-cell instability. \hlc\ is designed specifically for this setting: it uses traffic-relevant groups while shrinking fine-cell corrections toward coarser parents, preserving interpretability and inference efficiency. We do not claim a new finite-sample conformal theorem; instead, we demonstrate an empirical calibration--sharpness gain under a validation-only test protocol.
+
+\subsection{Incident-Regime Reliability}
+Traffic systems must remain reliable under rare events such as crashes, abrupt drops, and demand surges. Aggregate metrics can obscure these regimes because rare events contribute little to averages. We therefore evaluate event-conditioned coverage, interval score, and a mean-vs-dispersion diagnostic to determine whether failures arise from narrow intervals or from frozen-mean errors caused by regime shifts. This diagnostic complements the calibration algorithm by clarifying what residual calibration can and cannot repair.
+
+\section{Method}
+
+\subsection{Problem Formulation}
+Let $X_{t-L+1:t}\in\mathbb{R}^{L\times N\times C}$ denote the historical observations from $N$ sensors over an input window of length $L$. The target is $Y_{t+1:t+H}\in\mathbb{R}^{H\times N}$. A deterministic backbone $f_\theta$ produces a frozen mean forecast
+\begin{equation}
+    \hat{\mu}_{t,h,n}=f_\theta(X_{t-L+1:t})_{h,n}.
+\end{equation}
+The residual is
+\begin{equation}
+    e_{t,h,n}=Y_{t,h,n}-\hat{\mu}_{t,h,n}.
+\end{equation}
+The calibration layer outputs a prediction interval $[L_{t,h,n},U_{t,h,n}]$ for each horizon and node. We evaluate marginal coverage, interval width, and Winkler score after inverse transformation to the physical traffic scale.
+
+\subsection{Mean-Preserving Residual Calibration}
+The proposed protocol freezes $f_\theta$ before residual calibration. The point forecast used for MAE and RMSE remains $\hat{\mu}$ for all residual calibration variants. Thus any probabilistic layer can only change the interval or distribution around $\hat{\mu}$, not the deterministic point estimate. This prevents uncertainty calibration from silently improving or degrading point accuracy and makes same-backbone comparisons interpretable.
+
+\subsection{Base Residual Quantiles and Nonconformity Score}
+On validation residuals, we fit asymmetric base residual quantiles for each node--horizon pair,
+\begin{equation}
+    q^{\mathrm{lo}}_{h,n},\quad q^{\mathrm{hi}}_{h,n},
+\end{equation}
+at levels $\alpha/2$ and $1-\alpha/2$. For a validation residual $e_{t,h,n}$, the CQR nonconformity score is
+\begin{equation}
+    E_{t,h,n}=\max\left(q^{\mathrm{lo}}_{h,n}-e_{t,h,n},\; e_{t,h,n}-q^{\mathrm{hi}}_{h,n}\right).
+\end{equation}
+A positive value means that the base interval failed to cover the residual and must be widened; a negative value means the residual lies inside the base interval.
+
+\subsection{Traffic-Structured Calibration Hierarchy}
+Instead of using a single global conformal correction, \hlc\ organizes validation residual scores into a nested traffic hierarchy:
+\begin{equation}
+    G_0\rightarrow G_1\rightarrow G_2\rightarrow G_3\rightarrow G_4,
+\end{equation}
+where $G_0$ is global, $G_1$ conditions on horizon $h$, $G_2$ conditions on node and horizon $(n,h)$, $G_3$ additionally conditions on predicted-load bin $\ell$, and $G_4$ further conditions on time-of-day bin $\tau_{\mathrm{tod}}$:
+\begin{equation}
+    G_4=(n,h,\ell,\tau_{\mathrm{tod}}).
+\end{equation}
+Predicted-load bins are computed from $\hat{\mu}$ using validation-set quantiles and then fixed for test inference. This hierarchy reflects two traffic facts: residual uncertainty varies spatially and temporally, and roads under different predicted load regimes have different residual dispersion.
+
+\subsection{Sample-Size-Adaptive Shrinkage}
+For each cell $g$, let $Q_g$ be the empirical $(1-\alpha)$ quantile of the CQR score $E$ within that cell, and let $n_g$ be the number of validation samples in the cell. Fine cells are more specific but less reliable when $n_g$ is small. \hlc\ therefore computes a shrunk correction recursively:
+\begin{equation}
+    Q^*_{\mathrm{root}}=Q_{\mathrm{root}},
+\end{equation}
+\begin{equation}
+    Q^*_g=\lambda_g Q_g+(1-\lambda_g)Q^*_{\mathrm{pa}(g)},
+    \qquad
+    \lambda_g=\frac{n_g}{n_g+\tau},
+\end{equation}
+where $\mathrm{pa}(g)$ denotes the parent cell and $\tau$ controls the strength of shrinkage. When $n_g=0$, $\lambda_g=0$ and the method falls back exactly to the parent correction. When $n_g$ is large, $\lambda_g\approx 1$ and the fine cell is trusted. Thus $\tau$ interpolates between naive fine-grained Mondrian calibration and coarse split conformal calibration.
+
+\subsection{Inference and Complexity}
+For a test point, \hlc\ identifies its hierarchy path from $(h,n,\ell,\tau_{\mathrm{tod}})$ and retrieves the precomputed shrunk correction $Q^*_{\mathrm{leaf}}$. The calibrated interval is
+\begin{equation}
+    L_{t,h,n}=\hat{\mu}_{t,h,n}+q^{\mathrm{lo}}_{h,n}-Q^*_{\mathrm{leaf}},
+\end{equation}
+\begin{equation}
+    U_{t,h,n}=\hat{\mu}_{t,h,n}+q^{\mathrm{hi}}_{h,n}+Q^*_{\mathrm{leaf}}.
+\end{equation}
+All corrections are computed once on validation data. Test-time inference is table lookup, requiring $O(1)$ additional computation per target point after the deterministic backbone forecast.
+
+\begin{figure*}[t]
+\centering
+\fbox{\parbox[c][1.45in][c]{0.92\textwidth}{\centering \textbf{Figure placeholder: Method framework.} Historical traffic $X$ $\rightarrow$ frozen deterministic backbone $\rightarrow$ mean forecast $\hat{\mu}$ $\rightarrow$ residual score construction $\rightarrow$ HLC-CQR hierarchy and shrinkage $\rightarrow$ calibrated interval $[L,U]$.}}
+\caption{Overall framework of the proposed mean-preserving hierarchical conformal residual calibration method. The deterministic mean is frozen; only residual uncertainty is calibrated.}
+\label{fig:framework}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox[c][1.55in][c]{0.43\textwidth}{\centering \textbf{Figure placeholder: HLC hierarchy.} Tree: global $\rightarrow$ horizon $\rightarrow$ node $\rightarrow$ predicted load $\rightarrow$ time of day, with $Q_g^*=\lambda_gQ_g+(1-\lambda_g)Q^*_{pa(g)}$.}}
+\caption{Traffic-structured hierarchy and sample-size-adaptive shrinkage in \hlc. Fine groups are used when sufficiently populated and otherwise shrink toward coarser parents.}
+\label{fig:hierarchy}
+\end{figure}
+
+\subsection{Residual Generators and Incident Diagnostics}
+Residual diffusion and heteroscedastic Gaussian residual heads are used as same-backbone probabilistic baselines. They are not the headline contribution of this paper. We include them to answer whether a heavier generative residual model is necessary once the deterministic mean and residual calibration are fixed. For incident diagnostics, we define event subsets from ground-truth traffic dynamics and report event-conditioned interval metrics. We also compute
+\begin{equation}
+    \rho_{t,h,n}=\frac{|Y_{t,h,n}-\hat{\mu}_{t,h,n}|}{(U_{t,h,n}-L_{t,h,n})/2+\varepsilon},
+\end{equation}
+which measures whether a miss is primarily caused by frozen-mean error or insufficient interval width.
+
+\section{Experiments}
+
+\subsection{Protocol}
+All results are reported in the original traffic scale. Backbones are trained or reproduced before calibration and then frozen. Calibration parameters, including quantile bins and $\tau$, are selected on validation data only; the test set is evaluated once. We report PICP, mean prediction interval width (MPIW), Winkler score, and conditional coverage errors. For paired comparisons with external interval anchors, we use matched test windows and report clustered bootstrap confidence intervals and Wilcoxon signed-rank tests when per-window artifacts are available.
+
+\subsection{Datasets and Backbones}
+We evaluate on PeMS08 and PeMS04. The primary calibration experiments use a strong frozen deterministic backbone and preserve its point MAE/RMSE by construction. External probabilistic baselines such as CSDI and PriSTI are treated as separate model families because they do not share the same frozen mean. Same-backbone comparisons are used to attribute improvements to residual calibration rather than to a different deterministic predictor.
+
+\subsection{Main Calibration Comparison}
+Table~\ref{tab:hlc_main} compares split conformal, node--horizon CQR, load-conditioned CQR, naive load$\times$TOD Mondrian CQR, and \hlc. \hlc\ achieves the lowest Winkler score on both datasets while maintaining near-nominal 90\% coverage. The improvement over coarse conformal is large, especially on PeMS04, indicating that traffic-conditioned residual calibration is necessary. Compared with naive load$\times$TOD calibration, \hlc\ is slightly sharper at full calibration and becomes substantially more reliable under calibration-data scarcity.
+
+\begin{table}[t]
+\centering
+\caption{Main calibration comparison (8-seed mean, nominal $90\%$, validation-calibrated, test evaluated once). Lower MPIW/Winkler and worst-bin errors are better; PICP near $0.90$ is better.}
+\label{tab:hlc_main}
+\footnotesize
+\begin{tabular}{llccccc}
+\toprule
+Data & Method & PICP & MPIW & Winkler & TODw & LOADw \\
+\midrule
+\multirow{5}{*}{PeMS08}
+ & Conformal      & 0.900 & 63.33 & 96.18 & 0.087 & 0.056 \\
+ & CQR (node,$h$) & 0.900 & 62.89 & 95.22 & 0.086 & 0.055 \\
+ & CQR-load       & 0.898 & 60.60 & 89.62 & 0.043 & 0.008 \\
+ & CQR-load-TOD   & 0.896 & 60.64 & 88.01 & \textbf{0.015} & 0.010 \\
+ & \hlc           & 0.896 & \textbf{60.23} & \textbf{87.64} & 0.018 & 0.010 \\
+\midrule
+\multirow{5}{*}{PeMS04}
+ & Conformal      & 0.900 & 86.13 & 126.93 & 0.096 & 0.089 \\
+ & CQR (node,$h$) & 0.899 & 85.23 & 126.07 & 0.096 & 0.090 \\
+ & CQR-load       & 0.896 & 78.37 & 112.13 & 0.028 & \textbf{0.008} \\
+ & CQR-load-TOD   & 0.894 & 78.80 & 111.67 & \textbf{0.016} & 0.011 \\
+ & \hlc           & 0.894 & \textbf{78.35} & \textbf{111.22} & \textbf{0.016} & 0.010 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Shrinkage Ablation}
+Table~\ref{tab:hlc_tau} studies the shrinkage parameter $\tau$. The two extremes are undesirable: $\tau=0$ recovers naive fine-grained Mondrian calibration and is vulnerable to sparse cells, while $\tau\rightarrow\infty$ ignores fine traffic structure and reverts to coarse conformal calibration. Intermediate shrinkage gives the best interval score. We use $\tau=20$ as the main validation-registered setting; $\tau=50$ is reported only as a sensitivity point.
+
+\begin{table}[t]
+\centering
+\caption{Shrinkage ablation (8-seed mean, nominal $90\%$). $\tau=0$ is naive fine-grained Mondrian calibration; $\tau=\infty$ is coarse conformal.}
+\label{tab:hlc_tau}
+\footnotesize
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{PeMS08} & \multicolumn{2}{c}{PeMS04} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+$\tau$ & PICP & Winkler & PICP & Winkler \\
+\midrule
+0 (naive)        & 0.895 & 87.98 & 0.893 & 111.68 \\
+5                & 0.895 & 87.80 & 0.893 & 111.41 \\
+10               & 0.895 & 87.73 & 0.893 & 111.32 \\
+20 (main)        & 0.896 & 87.64 & 0.894 & 111.22 \\
+50 (sensitivity) & 0.897 & \textbf{87.54} & 0.896 & \textbf{111.11} \\
+100              & 0.900 & 87.57 & 0.900 & 111.12 \\
+200              & 0.903 & 87.83 & 0.905 & 111.47 \\
+$\infty$ (coarse)& 0.899 & 95.21 & 0.899 & 126.06 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Calibration Sample Efficiency}
+Table~\ref{tab:hlc_sample} is the most direct evidence for the hierarchical shrinkage mechanism. At full calibration, load-conditioned, load$\times$TOD, and \hlc\ variants are close. When the calibration set is reduced, naive load$\times$TOD calibration loses sharpness quickly because fine cells become sparse. \hlc\ degrades gracefully and remains best at every calibration ratio on both datasets.
+
+\begin{table}[t]
+\centering
+\caption{Calibration sample-efficiency stress test (8-seed mean Winkler90, nominal $90\%$). The validation calibration set is subsampled to the listed ratio. Lower is better.}
+\label{tab:hlc_sample}
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+Ratio & CQR-load & CQR-load-TOD (naive) & \hlc \\
+\midrule
+\multicolumn{4}{l}{\emph{PeMS08}} \\
+100\% & 89.62 & 88.01 & \textbf{87.64} \\
+ 25\% & 90.17 & 89.45 & \textbf{88.49} \\
+ 10\% & 91.29 & 92.15 & \textbf{89.78} \\
+  5\% & 93.54 & 95.32 & \textbf{91.68} \\
+\midrule
+\multicolumn{4}{l}{\emph{PeMS04}} \\
+100\% & 112.13 & 111.67 & \textbf{111.22} \\
+ 25\% & 112.96 & 113.80 & \textbf{112.30} \\
+ 10\% & 114.51 & 118.22 & \textbf{113.96} \\
+  5\% & 118.35 & 123.46 & \textbf{116.86} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[t]
+\centering
+\fbox{\parbox[c][1.50in][c]{0.92\textwidth}{\centering \textbf{Figure placeholder: calibration--sharpness and sample-efficiency plots.} Left: PICP vs Winkler/MPIW frontier on PeMS08 and PeMS04. Right: Winkler score under 100\%, 25\%, 10\%, and 5\% calibration ratios.}}
+\caption{Recommended visualization for the calibration contribution. The frontier demonstrates that \hlc\ is not merely widening intervals, and the stress curve shows robustness under limited calibration data.}
+\label{fig:frontier_sample}
+\end{figure*}
+
+\subsection{Multiple Nominal Levels and External Interval Anchor}
+The advantage of \hlc\ is not specific to the 90\% interval. At 80/90/95\% nominal levels, \hlc\ achieves the best Winkler score among conformal, CQR-load, and \hlc\ on both datasets while maintaining near-nominal coverage; for example, PeMS08 Winkler scores are 68.74/87.64/109.93 and PeMS04 scores are 88.83/111.22/136.71. Using matched test windows, \hlc\ also improves window-level Winkler score over an external CSDI interval anchor on both datasets (PeMS08 $\Delta=-9.40$, 90\% CI $[-9.82,-8.99]$; PeMS04 $\Delta=-8.90$, 90\% CI $[-9.27,-8.54]$; Wilcoxon $p\approx 0$). This is an interval-score comparison, not a CRPS claim: \hlc\ is an interval calibration method rather than a sampler.
+
+\subsection{Localized Conformal and Runtime}
+A natural baseline is localized conformal prediction with continuous-load k-nearest-neighbor search. Using the same CQR score and selecting $k$ on a held-out validation split, localized conformal is competitive: \hlc\ is lower on PeMS08 (87.77 vs. 88.53 Winkler), while localized conformal is slightly lower on PeMS04 (110.65 vs. 111.24). The operational difference is runtime and interpretability. \hlc\ builds a single correction table and performs $O(1)$ lookup per test point, while localized conformal performs per-test neighbor search over the calibration pool, roughly two orders of magnitude slower in our implementation. Thus \hlc\ is not claimed to dominate generic locality, but to provide a strong deployable calibration--sharpness trade-off with transparent traffic cells.
+
+\subsection{Incident-Regime Reliability}
+Table~\ref{tab:event_refresh} shows that rare traffic drops remain difficult for all probabilistic methods. On the drop subset, coverage is extremely low for external generative baselines and residual generators; on spike windows, coverage is much stronger. This asymmetry motivates event-conditioned reliability reporting rather than relying only on aggregate metrics.
+
+\begin{table}[t]
+\centering
+\caption{PeMS08 event-local reliability on refreshed drop/spike subsets. Drop uses an extreme-drop event file and spike uses an extreme-surge file. Subset size is reported explicitly.}
+\label{tab:event_refresh}
+\footnotesize
+\begin{tabular}{llcccc}
+\toprule
+Subset & Method & Points & CRPS & PICP90 & Winkler90 \\
+\midrule
+Drop & Gaussian-B & 36 & 220.360 & 0.000 & 3715.303 \\
+Drop & CSDI       & 36 & 225.201 & 0.028 & 4078.337 \\
+Drop & Diffusion  & 36 & 237.865 & 0.000 & 4599.912 \\
+Drop & PriSTI     & 36 & 192.215 & 0.000 & 3504.825 \\
+Spike & CSDI      & 48 & 6.639 & 0.979 & 90.505 \\
+Spike & Diffusion & 48 & 11.254 & 1.000 & 103.096 \\
+Spike & PriSTI    & 48 & 9.421 & 1.000 & 84.083 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:rho_decomposition} reports the mean-vs-dispersion diagnostic. Drop windows have median $\rho$ far above one, meaning the target lies many interval half-widths away from the frozen mean. These failures are therefore dominated by mean-level regime surprises rather than minor dispersion errors. A residual calibration layer can improve interval reliability under ordinary heterogeneity, but it should not be oversold as solving abrupt unobserved incidents.
+
+\begin{table}[t]
+\centering
+\caption{Mean-vs-dispersion diagnostic on PeMS08 event subsets. $\rho$ is the absolute frozen-mean error divided by the 90\% interval half-width.}
+\label{tab:rho_decomposition}
+\scriptsize
+\setlength{\tabcolsep}{2pt}
+\begin{tabular}{@{}llccccc@{}}
+\toprule
+Subset & Method & Points & Cov. & $\rho_{50}$ & $\rho_{90}$ & Halfwidth \\
+\midrule
+Drop & CSDI      & 36 & 0.028 & 17.656 & 29.814 & 15.899 \\
+Drop & Diffusion & 36 & 0.000 & 23.918 & 62.151 & 5.989 \\
+Drop & PriSTI    & 36 & 0.000 & 7.128 & 26.694 & 28.845 \\
+Spike & CSDI     & 48 & 0.979 & 0.343 & 0.579 & 20.321 \\
+Spike & Diffusion& 48 & 0.979 & 0.170 & 0.539 & 56.858 \\
+Spike & PriSTI   & 48 & 1.000 & 0.305 & 0.691 & 20.715 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox[c][1.55in][c]{0.43\textwidth}{\centering \textbf{Figure placeholder: reliability diagram and event case study.} Plot empirical vs nominal coverage for 50/80/90/95\% levels, and one representative spike/drop forecast window with intervals.}}
+\caption{Recommended reliability visualizations. Multi-level reliability diagrams prevent over-interpreting a single 90\% interval, while event case studies show the operational meaning of coverage failures.}
+\label{fig:reliability_case}
+\end{figure}
+
+\subsection{Discussion of Non-Selected Components}
+Residual diffusion and Gaussian residual heads are useful diagnostics, but the evidence does not require a heavy generative model for the main calibration claim. When the deterministic mean is frozen, much of the interval-score gain comes from residual conditioning granularity and validation-honest calibration. External semantic signals are also not used as a headline mechanism: naive semantic conditioning does not consistently improve aggregate calibration. Future work may use semantic or incident information to update the mean forecast or to trigger event-specific calibration, but this paper's deployable contribution is the structured conformal residual layer.
+
+\section{Conclusion}
+
+This paper presented \hlc, a mean-preserving hierarchical conformal residual calibration layer for reliable probabilistic traffic forecasting. The method freezes a strong deterministic backbone, calibrates only residual uncertainty, and organizes conformal corrections along a traffic-structured hierarchy with sample-size-adaptive shrinkage. Experiments on PeMS08 and PeMS04 show that \hlc\ achieves the best interval score at near-nominal coverage among conformal residual calibration baselines, remains robust when calibration data are scarce, and improves matched-window Winkler score over an external CSDI interval anchor. Incident-regime diagnostics further demonstrate that aggregate probabilistic metrics can conceal severe under-coverage on rare traffic drops, and that some failures are caused by frozen-mean regime surprises rather than by interval miscalibration alone. These results support \hlc\ as a simple, interpretable, and deployment-friendly calibration layer for traffic uncertainty estimation.
+
+\bibliographystyle{IEEEtran}
+\bibliography{prompt-stdiff-refs}
+
+\end{document}
